@@ -100,6 +100,7 @@ class BatimentosApp(ctk.CTk):
         self._worker: Optional[CaptureWorker]   = None
         self._last_time:    Optional[np.ndarray] = None
         self._last_voltage: Optional[np.ndarray] = None
+        self._last_metrics: dict = {}
         self._log_history: list[str] = []
 
         self._build_ui()
@@ -392,6 +393,7 @@ class BatimentosApp(ctk.CTk):
     def _gui_update(self, t, v, m: dict):
         self._last_time    = t
         self._last_voltage = v
+        self._last_metrics = m
 
         # ── Cards de dados ──────────────────────────────────────────────────
         self._card_T  .update(calc.fmt_time(m["T"]))
@@ -438,13 +440,54 @@ class BatimentosApp(ctk.CTk):
     def _save_csv(self):
         if self._last_time is None:
             return
-        ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        m   = self._last_metrics
+        ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
+        ts_pretty = datetime.now().strftime("%d/%m/%Y  %H:%M:%S")
+        ch  = self._ch_var.get()
         path = Path(f"captura_{ts}.csv")
+
         with open(path, "w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
+
+            # ── Cabeçalho / Metadados ─────────────────────────────────────
+            w.writerow(["# ============================================================"])
+            w.writerow(["# EXPERIMENTO: BATIMENTOS E RESSONÂNCIA"])
+            w.writerow(["# ============================================================"])
+            w.writerow([f"# Data/Hora:             {ts_pretty}"])
+            w.writerow([f"# Canal:                 {ch}"])
+            w.writerow([f"# Pontos capturados:     {len(self._last_time)}"])
+            w.writerow(["#"])
+            w.writerow(["# MÉTRICAS CALCULADAS"])
+            w.writerow([f"# Período (T):           {calc.fmt_time(m['T'])}"])
+            w.writerow([f"# Frequência (f=1/T):    {calc.fmt_hz(m['f'])}"])
+            w.writerow([f"# Pico f1 (FFT):         {calc.fmt_hz(m['f1'])}"])
+            w.writerow([f"# Pico f2 (FFT):         {calc.fmt_hz(m['f2'])}"])
+            w.writerow([f"# Batimento |f1-f2|:     {calc.fmt_hz(m['f_bat'])}"])
+            w.writerow([f"# Freq. Média (f1+f2)/2: {calc.fmt_hz(m['f_med'])}"])
+            w.writerow([f"# Tensão máxima:         {m['v_max']:.4f} V"])
+            w.writerow([f"# Tensão mínima:         {m['v_min']:.4f} V"])
+            w.writerow(["#"])
+            w.writerow(["# Ref: Batimentos e Ressonância — RBEF/SciELO"])
+            w.writerow(["# https://www.scielo.br/j/rbef/a/D7k5Pxj7HcmmbpGZJMf4wNs/"])
+            w.writerow(["# ============================================================"])
+            w.writerow([])
+
+            # ── Seção 1: Forma de Onda ────────────────────────────────────
+            w.writerow(["# SEÇÃO 1 — FORMA DE ONDA"])
             w.writerow(["tempo_s", "tensao_v"])
             for t, v in zip(self._last_time, self._last_voltage):
                 w.writerow([f"{t:.9f}", f"{v:.6f}"])
+
+            w.writerow([])
+
+            # ── Seção 2: Espectro FFT ─────────────────────────────────────
+            w.writerow(["# SEÇÃO 2 — ESPECTRO FFT"])
+            w.writerow(["frequencia_hz", "amplitude_norm"])
+            for f, a in zip(m["freqs"], m["amps"]):
+                if f <= 5000:                      # salva até 5 kHz
+                    w.writerow([f"{f:.4f}", f"{a:.6f}"])
+
         self._log(f"💾  Salvo: {path.resolve()}")
 
     # ─── Log ──────────────────────────────────────────────────────────────────
