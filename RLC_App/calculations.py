@@ -1,304 +1,234 @@
 # calculations.py
 """
-Cálculos físicos do circuito RLC série.
+Cálculos do experimento de Batimentos e Ressonância.
 
-Baseado na analogia elétrica do oscilador harmônico forçado amortecido
-descrita no artigo:
-
+Baseado no artigo:
     "Batimentos e Ressonância" — RBEF / SciELO
     https://www.scielo.br/j/rbef/a/D7k5Pxj7HcmmbpGZJMf4wNs/
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  ANALOGIA MECÂNICA ↔ ELÉTRICA  (artigo, Eq. 4)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Grandeza mecânica            Grandeza elétrica
-  ─────────────────────────    ─────────────────────────
-  Massa           m        ↔   Indutância        L  [H]
-  Amortecimento   b        ↔   Resistência        R  [Ω]
-  Rigidez         k        ↔   1/Capacitância  1/C  [1/F]
-  Força           F₀       ↔   Tensão de entrada  V_in  [V]
-  Deslocamento    x        ↔   Carga             q  [C]
-
-  Equação diferencial mecânica (artigo, Eq. 4):
-      m·ẍ + b·ẋ + k·x = F₀·cos(ωt)
-
-  Equivalente elétrico (RLC série):
-      L·q̈ + R·q̇ + (1/C)·q = V_in·cos(ωt)
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  AMPLITUDE DE RESSONÂNCIA  (artigo, Eq. 6)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Mecânica:
-      x₀(ω) = F₀ / √[ (k − mω²)² + (bω)² ]
-
-  Elétrica — tensão sobre R (resposta passa-faixa):
-      V_out(ω) = V_in · R / √[ R² + (ωL − 1/ωC)² ]
-
-  Ganho (função de transferência em módulo):
-      |H(jω)| = V_out / V_in = R / √[ R² + (ωL − 1/ωC)² ]
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  FREQUÊNCIA NATURAL / RESSONÂNCIA  (artigo, Eq. 7)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Mecânica:    ω₀ = √(k/m)
-  Elétrica:    ω₀ = 1/√(LC)   →   f₀ = 1 / (2π√(LC))
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  FATOR DE QUALIDADE E LARGURA DE BANDA
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Q  = (1/R) · √(L/C)   =  ω₀·L / R   =  1/(ω₀·R·C)
-  BW = f₀ / Q           =  R / (2π·L)          [Hz]
-
-  Frequências de meia-potência (-3 dB):
-      α   = R / (2L)
-      f₁  = (−α + √(α² + ω₀²)) / (2π)
-      f₂  = ( α + √(α² + ω₀²)) / (2π)
-      BW  = f₂ − f₁
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  BATIMENTOS  (artigo, Eq. 3)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  f_bat = |f₁ − f₂|   (frequência de batimento)
-  f_med = (f₁ + f₂)/2 (frequência média / portadora)
+Equações implementadas
+──────────────────────
+  (1)  f = 1 / T                     frequência fundamental
+  (2)  f_bat = |f₁ − f₂|            frequência de batimento (artigo Eq. 3)
+  (3)  f_med = (f₁ + f₂) / 2        frequência média / portadora
+  (4)  FFT                           confirmação espectral (artigo usa FFT
+                                     para validar os valores medidos)
 """
 
 from __future__ import annotations
-
 import numpy as np
 
-try:
-    from scipy.optimize import curve_fit
-
-    _SCIPY = True
-except ImportError:
-    _SCIPY = False
-
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Função de transferência
+# Período e frequência  (artigo Eq. 1)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def transfer_function(
-    f: np.ndarray,
-    R: float,
-    L: float,
-    C: float,
-) -> np.ndarray:
+def period_from_zero_crossings(time: np.ndarray, voltage: np.ndarray) -> float:
     """
-    Módulo da função de transferência  |H(jω)| = V_out / V_in
-    medida sobre o resistor R do circuito RLC série.
+    Estima o período T medindo o tempo médio entre cruzamentos
+    ascendentes pelo zero.
 
-    Derivada diretamente da Eq. 6 do artigo (amplitude do oscilador forçado):
+    Equivale à leitura de T diretamente na tela do osciloscópio.
 
-        |H(jω)| = R / √[ R² + (ωL − 1/ωC)² ]
-
-    Parâmetros
-    ----------
-    f   : frequências em Hz
-    R   : resistência em Ω
-    L   : indutância em H
-    C   : capacitância em F
+    Retorna T em segundos (0.0 se não encontrar cruzamentos suficientes).
     """
-    f = np.asarray(f, dtype=float)
-    w = 2.0 * np.pi * f
-    Xl = w * L
-    Xc = 1.0 / (w * C + 1e-30)          # evita divisão por zero
-    Z  = np.sqrt(R**2 + (Xl - Xc)**2)
-    return R / Z
+    # Detecta cruzamentos ascendentes (sinal vai de negativo para positivo)
+    signs      = np.sign(voltage)
+    crossings  = np.where((signs[:-1] < 0) & (signs[1:] >= 0))[0]
+
+    if len(crossings) < 2:
+        return 0.0
+
+    # Interpola linearmente o instante exato de cada cruzamento
+    times_cross = []
+    for i in crossings:
+        v0, v1 = voltage[i], voltage[i + 1]
+        t0, t1 = time[i],    time[i + 1]
+        t_cross = t0 - v0 * (t1 - t0) / (v1 - v0)
+        times_cross.append(t_cross)
+
+    # Período médio entre cruzamentos consecutivos
+    periods = np.diff(times_cross)
+    return float(np.mean(periods))
+
+
+def frequency_from_period(T: float) -> float:
+    """
+    f = 1 / T   (artigo Eq. 1)
+    Retorna 0.0 se T for zero ou inválido.
+    """
+    if T > 0:
+        return 1.0 / T
+    return 0.0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Modelo passa-faixa normalizado (para curve fitting)
+# FFT  (artigo usa FFT para confirmar valores)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _bandpass_model(
-    f: np.ndarray,
-    A: float,
-    f0: float,
-    Q: float,
-) -> np.ndarray:
+def compute_fft(
+    time: np.ndarray,
+    voltage: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
     """
-    Forma normalizada do oscilador forçado amortecido (artigo, Eq. 6)
-    reescrita em termos de f₀ e Q:
-
-        H(f) = A · (f/f₀)/Q / √[ (1 − (f/f₀)²)² + ((f/f₀)/Q)² ]
-
-    Em f = f₀  →  H ≈ A  (ganho de pico).
-
-    Usada internamente no ajuste Levenberg–Marquardt.
-    """
-    x = np.asarray(f, dtype=float) / f0
-    num = x / Q
-    den = np.sqrt((1.0 - x**2) ** 2 + (x / Q) ** 2)
-    den = np.where(den == 0.0, np.finfo(float).eps, den)
-    return A * num / den
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Métricas teóricas (a partir dos valores dos componentes)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def compute_metrics_from_components(R: float, L: float, C: float) -> dict:
-    """
-    Calcula as grandezas características do circuito RLC série
-    a partir dos valores conhecidos dos componentes.
-
-    Equações (analogia com o artigo):
-
-        f₀ = 1 / (2π√(LC))     ← artigo Eq. 7: ω₀ = √(k/m)
-        Q  = (1/R)·√(L/C)
-        BW = f₀ / Q  =  R/(2πL)
-        f₁, f₂  (frequências de meia-potência, solução exata)
+    Calcula o espectro de frequência (FFT) da forma de onda.
 
     Retorna
     -------
-    dict com chaves: f0, Q, BW, f1, f2  (todos em Hz, adimensional para Q)
+    freqs : np.ndarray — frequências em Hz (apenas lado positivo)
+    amps  : np.ndarray — amplitudes normalizadas (0 a 1)
     """
-    if R <= 0 or L <= 0 or C <= 0:
-        return {"f0": 0.0, "Q": 0.0, "BW": 0.0, "f1": 0.0, "f2": 0.0}
+    n    = len(voltage)
+    dt   = float(np.mean(np.diff(time))) if n > 1 else 1.0
 
-    w0 = 1.0 / np.sqrt(L * C)
-    f0 = w0 / (2.0 * np.pi)
-    Q  = (1.0 / R) * np.sqrt(L / C)
-    BW = f0 / Q
+    # FFT e frequências
+    fft_vals = np.fft.rfft(voltage * np.hanning(n))
+    freqs    = np.fft.rfftfreq(n, d=dt)
+    amps     = np.abs(fft_vals)
 
-    alpha   = R / (2.0 * L)
-    w0_sq   = 1.0 / (L * C)
-    w1      = -alpha + np.sqrt(alpha**2 + w0_sq)
-    w2      =  alpha + np.sqrt(alpha**2 + w0_sq)
-    f1      = w1 / (2.0 * np.pi)
-    f2      = w2 / (2.0 * np.pi)
+    # Normaliza para 0–1
+    max_amp = amps.max()
+    if max_amp > 0:
+        amps = amps / max_amp
 
-    return {"f0": float(f0), "Q": float(Q), "BW": float(BW),
-            "f1": float(f1), "f2": float(f2)}
+    return freqs, amps
+
+
+def find_peaks_fft(
+    freqs: np.ndarray,
+    amps:  np.ndarray,
+    n_peaks: int = 2,
+    min_freq: float = 50.0,
+) -> list[float]:
+    """
+    Encontra os `n_peaks` picos dominantes no espectro FFT
+    acima de `min_freq` Hz.
+
+    Retorna lista de frequências dos picos em Hz (ordenados por amplitude).
+    """
+    # Ignora componente DC e frequências muito baixas
+    mask   = freqs >= min_freq
+    f_filt = freqs[mask]
+    a_filt = amps[mask]
+
+    if len(f_filt) == 0:
+        return []
+
+    # Detecta picos locais simples (maior que os vizinhos)
+    peak_idx = []
+    for i in range(1, len(a_filt) - 1):
+        if a_filt[i] > a_filt[i - 1] and a_filt[i] > a_filt[i + 1]:
+            peak_idx.append(i)
+
+    if not peak_idx:
+        # Fallback: pega os maiores valores
+        peak_idx = np.argsort(a_filt)[::-1][:n_peaks].tolist()
+
+    # Ordena por amplitude decrescente e pega os n_peaks maiores
+    peak_idx_sorted = sorted(peak_idx, key=lambda i: a_filt[i], reverse=True)
+    top_idx         = peak_idx_sorted[:n_peaks]
+
+    # Retorna frequências ordenadas por valor (menor primeiro)
+    peak_freqs = sorted([float(f_filt[i]) for i in top_idx])
+    return peak_freqs
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Ajuste de curva (Levenberg–Marquardt)
+# Batimentos  (artigo Eq. 3)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _initial_guess(
-    freqs: np.ndarray,
-    gains: np.ndarray,
-) -> tuple[float, float, float]:
-    """Chutes iniciais (A₀, f₀₀, Q₀) a partir dos dados medidos."""
-    idx  = int(np.nanargmax(gains))
-    A0   = float(gains[idx])
-    f0_0 = float(freqs[idx])
-
-    target = A0 / np.sqrt(2.0)
-    mask   = gains >= target
-    if mask.sum() >= 2:
-        f_bw = freqs[mask]
-        BW0  = max(float(f_bw[-1]) - float(f_bw[0]), 1e-9)
-        Q0   = float(np.clip(f0_0 / BW0, 0.1, 1000.0))
-    else:
-        Q0 = 1.0
-
-    return A0, f0_0, Q0
-
-
-def fit_experimental_curve(
-    freqs: np.ndarray,
-    gains: np.ndarray,
-    n_smooth: int = 600,
-) -> dict | None:
+def beat_frequency(f1: float, f2: float) -> float:
     """
-    Ajuste Levenberg–Marquardt do modelo passa-faixa (Eq. 6 do artigo)
-    aos dados experimentais (ganho V_out/V_in vs. frequência).
+    f_bat = |f₁ − f₂|
 
-    Parâmetros
-    ----------
-    freqs    : frequências em Hz (array 1-D)
-    gains    : ganho medido V_out/V_in (adimensional ou em Vpp se V_in fixo)
-    n_smooth : pontos da curva ajustada suavizada
-
-    Retorna
-    -------
-    dict com:
-        A, f0, Q, BW, f1, f2,
-        freq_smooth (Hz), gain_smooth (mesmas unidades de gains)
-    None se dados insuficientes.
+    Frequência de batimento — taxa em que a amplitude oscila
+    quando dois sons de frequências próximas se somam.
     """
-    freqs = np.asarray(freqs, dtype=float)
-    gains = np.asarray(gains, dtype=float)
+    return abs(f1 - f2)
 
-    mask = np.isfinite(freqs) & np.isfinite(gains) & (freqs > 0) & (gains >= 0)
-    if mask.sum() < 5:
-        return None
 
-    f, g = freqs[mask], gains[mask]
-    A0, f0_0, Q0 = _initial_guess(f, g)
+def mean_frequency(f1: float, f2: float) -> float:
+    """
+    f_med = (f₁ + f₂) / 2
 
-    if _SCIPY:
-        try:
-            popt, _ = curve_fit(
-                _bandpass_model,
-                f, g,
-                p0=[A0, f0_0, Q0],
-                bounds=([0.0, f.min() * 0.5, 0.01], [np.inf, f.max() * 2.0, 2000.0]),
-                maxfev=20_000,
-            )
-            A, f0, Q = float(popt[0]), float(popt[1]), float(popt[2])
-        except Exception:
-            A, f0, Q = A0, f0_0, Q0
-    else:
-        A, f0, Q = A0, f0_0, Q0
+    Frequência média — corresponde à portadora audível
+    quando dois sons se somam (artigo Eq. 3).
+    """
+    return (f1 + f2) / 2.0
 
-    BW = f0 / Q if Q > 0 else 0.0
 
-    # Frequências de meia-potência via fórmula exata
-    # (equivalente ao resultado do artigo para o oscilador amortecido)
-    half_bw = BW / 2.0
-    f1 = max(f0 - half_bw, 0.0)
-    f2 = f0 + half_bw
+# ─────────────────────────────────────────────────────────────────────────────
+# Análise completa de uma captura
+# ─────────────────────────────────────────────────────────────────────────────
 
-    # Curva suavizada
-    f_smooth = np.logspace(np.log10(f.min()), np.log10(f.max()), n_smooth)
-    g_smooth = _bandpass_model(f_smooth, A, f0, Q)
+def analyze_waveform(
+    time: np.ndarray,
+    voltage: np.ndarray,
+) -> dict:
+    """
+    Recebe a forma de onda (tempo, tensão) e retorna todas as
+    grandezas calculadas pelo artigo.
+
+    Retorna dict com:
+        T       — período (s)
+        f       — frequência fundamental (Hz)
+        f1, f2  — dois picos FFT dominantes (Hz)
+        f_bat   — frequência de batimento = |f1 − f2| (Hz)
+        f_med   — frequência média = (f1 + f2)/2 (Hz)
+        freqs   — vetor de frequências FFT (Hz)
+        amps    — vetor de amplitudes FFT normalizadas
+        v_max   — tensão de pico positivo (V)
+        v_min   — tensão de pico negativo (V)
+    """
+    # Período e frequência via cruzamentos de zero
+    T = period_from_zero_crossings(time, voltage)
+    f = frequency_from_period(T)
+
+    # FFT
+    freqs_fft, amps_fft = compute_fft(time, voltage)
+
+    # Dois picos dominantes
+    peaks = find_peaks_fft(freqs_fft, amps_fft, n_peaks=2, min_freq=50.0)
+
+    f1 = peaks[0] if len(peaks) > 0 else 0.0
+    f2 = peaks[1] if len(peaks) > 1 else 0.0
+
+    f_bat = beat_frequency(f1, f2)
+    f_med = mean_frequency(f1, f2)
 
     return {
-        "A":           A,
-        "f0":          f0,
-        "Q":           Q,
-        "BW":          BW,
-        "f1":          f1,
-        "f2":          f2,
-        "freq_smooth": f_smooth,
-        "gain_smooth": g_smooth,
+        "T":     T,
+        "f":     f,
+        "f1":    f1,
+        "f2":    f2,
+        "f_bat": f_bat,
+        "f_med": f_med,
+        "freqs": freqs_fft,
+        "amps":  amps_fft,
+        "v_max": float(np.max(voltage)),
+        "v_min": float(np.min(voltage)),
     }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Batimentos (artigo, Eq. 3)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def beat_frequency(f1: float, f2: float) -> tuple[float, float]:
-    """
-    Calcula frequência de batimento e frequência média.
-
-    Artigo, Eq. 3:
-        f_bat = |f₁ − f₂|
-        f_med = (f₁ + f₂) / 2
-
-    Retorna (f_bat, f_med) em Hz.
-    """
-    return abs(f1 - f2), (f1 + f2) / 2.0
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Helpers de formatação
+# Formatação
 # ─────────────────────────────────────────────────────────────────────────────
 
 def fmt_hz(hz: float) -> str:
-    """Formata frequência com unidade automática (Hz / kHz / MHz)."""
-    if hz >= 1e6:
-        return f"{hz / 1e6:.4f} MHz"
+    """Formata frequência com unidade automática."""
+    if hz <= 0:
+        return "—"
     if hz >= 1e3:
-        return f"{hz / 1e3:.4f} kHz"
-    return f"{hz:.4f} Hz"
+        return f"{hz/1e3:.3f} kHz"
+    return f"{hz:.2f} Hz"
 
 
-def fmt_metric(value: float, unit: str = "", decimals: int = 4) -> str:
-    """Formata grandeza genérica."""
-    return f"{value:.{decimals}f} {unit}".strip()
+def fmt_time(s: float) -> str:
+    """Formata tempo com unidade automática."""
+    if s <= 0:
+        return "—"
+    if s < 1e-3:
+        return f"{s*1e6:.2f} µs"
+    if s < 1.0:
+        return f"{s*1e3:.3f} ms"
+    return f"{s:.4f} s"

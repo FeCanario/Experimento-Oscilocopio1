@@ -1,24 +1,22 @@
-# app.py  — RLC Experimento
+# app.py
 """
-Interface completamente diferente do RLC_Analyser_Pro.
+Interface do Experimento de Batimentos e Ressonância.
 
-Layout:
-  ┌──────────────────────────────────────────────────────┐
-  │  TOPBAR  — logo | conexão AFG | DPO | btn Conectar   │
-  ├────────────────────────────────┬─────────────────────┤
-  │                                │  DISPLAY LCD        │
-  │      BODE PLOT                 │  f₀  Q  BW  f₁  f₂ │
-  │    (gráfico dominante)         │  (números grandes)  │
-  │                                │                     │
-  ├────────────────────────────────┴─────────────────────┤
-  │  BARRA DE CONTROLES (horizontal)                     │
-  │  Componentes | Varredura | Botões | Progresso        │
-  ├──────────────────────────────────────────────────────┤
-  │  LOG (linha única rolante)                           │
-  └──────────────────────────────────────────────────────┘
-
-Paleta: navy #0a0f1e  |  cyan #00e5ff  |  magenta #ff2d78
-        (em vez do cinza #242424 + gold do app existente)
+Layout
+──────
+┌──────────────────────────────────────────────────────────┐
+│  TOPBAR — status DPO | canal | intervalo | botões        │
+├──────────────────────────────────────────────────────────┤
+│  DADOS:  T= │ f= │ f₁= │ f₂= │ f_bat= │ f_med=          │
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│   FORMA DE ONDA  (verde sobre preto, igual ao scope)    │
+│                                                          │
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│   ESPECTRO FFT   (picos f₁ e f₂ marcados)               │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
 """
 
 from __future__ import annotations
@@ -34,475 +32,285 @@ import matplotlib
 import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
+from matplotlib.gridspec import GridSpec
 
 import calculations as calc
 from instruments import ConnectionManager
-from worker import MeasurementWorker
+from worker import CaptureWorker
 
 matplotlib.use("TkAgg")
 
 # ── Paleta ────────────────────────────────────────────────────────────────────
-NAVY      = "#0a0f1e"
-NAVY_CARD = "#111827"
-NAVY_MID  = "#1c2a3a"
-CYAN      = "#00e5ff"
-MAGENTA   = "#ff2d78"
-GREEN     = "#00ff99"
-AMBER     = "#ffb300"
-GRAY_DIM  = "#3a4a5a"
-WHITE_DIM = "#c8d8e8"
+SCOPE_BG   = "#0a0f00"       # fundo do osciloscópio (preto-esverdeado)
+SCOPE_GRID = "#1a2a0a"       # grade
+WAVE_COLOR = "#00ff41"       # verde fosforescente da onda
+FFT_COLOR  = "#00ccff"       # azul ciano do espectro
+PEAK_COLOR = "#ff4444"       # vermelho dos picos marcados
+PEAK2_COLOR= "#ffaa00"       # laranja do segundo pico
 
-PLOT_BG   = "#07111d"
-PLOT_GRID = "#162232"
-C_DATA    = CYAN
-C_FIT     = MAGENTA
-C_THEORY  = "#667799"
-C_F0      = AMBER
-C_F1F2    = GREEN
+APP_BG     = "#0d1117"       # fundo geral
+CARD_BG    = "#161b22"       # fundo dos cards de dados
+BORDER     = "#30363d"       # bordas
+TEXT_DIM   = "#8b949e"       # texto secundário
+TEXT_MAIN  = "#e6edf3"       # texto principal
+CYAN       = "#58a6ff"       # azul destaque
+GREEN      = "#3fb950"       # verde OK
+RED        = "#f85149"       # vermelho erro
+AMBER      = "#d29922"       # amarelo aviso
 
-FONT_DISPLAY = ("Courier New", 28, "bold")
-FONT_LABEL   = ("Arial", 11)
-FONT_SECTION = ("Arial", 12, "bold")
-FONT_MONO    = ("Courier New", 11)
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _sep(parent, color=GRAY_DIM, orient="h"):
-    """Linha separadora fina."""
-    if orient == "h":
-        return ctk.CTkFrame(parent, height=1, fg_color=color, corner_radius=0)
-    return ctk.CTkFrame(parent, width=1, fg_color=color, corner_radius=0)
+FONT_DATA  = ("Courier New", 20, "bold")
+FONT_LABEL = ("Arial", 10)
+FONT_SEC   = ("Arial", 11, "bold")
+FONT_MONO  = ("Courier New", 11)
 
 
-class _LcdCard(ctk.CTkFrame):
-    """
-    Card de métrica no estilo display LCD digital.
-    Fundo escuro, label pequeno, valor grande em cyan.
-    """
-    def __init__(self, parent, label: str, unit: str = "", **kw):
-        super().__init__(parent, fg_color=NAVY_CARD, corner_radius=8, **kw)
-        self._unit = unit
+# ── Card de dado numérico ─────────────────────────────────────────────────────
+
+class DataCard(ctk.CTkFrame):
+    """Card compacto: label em cima, valor grande embaixo."""
+
+    def __init__(self, parent, label: str, color: str = TEXT_MAIN, **kw):
+        super().__init__(parent, fg_color=CARD_BG, corner_radius=6,
+                         border_width=1, border_color=BORDER, **kw)
         ctk.CTkLabel(self, text=label, font=FONT_LABEL,
-                     text_color=GRAY_DIM).pack(anchor="w", padx=10, pady=(6, 0))
+                     text_color=TEXT_DIM).pack(pady=(6, 0), padx=10)
+        self._val = ctk.CTkLabel(self, text="—", font=FONT_DATA,
+                                 text_color=color)
+        self._val.pack(pady=(0, 6), padx=10)
 
-        self._val_exp = ctk.CTkLabel(self, text="—",
-                                     font=FONT_DISPLAY, text_color=CYAN)
-        self._val_exp.pack(anchor="w", padx=10, pady=(0, 2))
-
-        self._val_teo = ctk.CTkLabel(self, text="teórico: —",
-                                     font=FONT_MONO, text_color=GRAY_DIM)
-        self._val_teo.pack(anchor="w", padx=10, pady=(0, 6))
-
-    def _fmt(self, v: Optional[float]) -> str:
-        if v is None:
-            return "—"
-        return calc.fmt_hz(v) if self._unit == "Hz" else f"{v:.4g}"
-
-    def update(self, exp: Optional[float] = None, teo: Optional[float] = None):
-        self._val_exp.configure(text=self._fmt(exp))
-        self._val_teo.configure(text=f"teórico: {self._fmt(teo)}")
-
-
-class _InlineEntry(ctk.CTkFrame):
-    """Label acima + entry pequeno."""
-    def __init__(self, parent, label: str, default: str, width: int = 80, **kw):
-        super().__init__(parent, fg_color="transparent", **kw)
-        ctk.CTkLabel(self, text=label, font=FONT_LABEL,
-                     text_color=WHITE_DIM).pack(anchor="w")
-        self.entry = ctk.CTkEntry(self, width=width, height=28,
-                                  fg_color=NAVY_MID, border_color=GRAY_DIM,
-                                  text_color=CYAN, font=FONT_MONO)
-        self.entry.pack(anchor="w")
-        self.entry.insert(0, default)
-
-    def get(self) -> str:
-        return self.entry.get().strip()
-
-    def get_float(self, fb: float = 0.0) -> float:
-        try:
-            return float(self.get())
-        except ValueError:
-            return fb
-
-    def get_int(self, fb: int = 0) -> int:
-        try:
-            return int(self.get())
-        except ValueError:
-            return fb
+    def update(self, text: str):
+        self._val.configure(text=text)
 
 
 # ── App principal ─────────────────────────────────────────────────────────────
 
-class RLCApp(ctk.CTk):
+class BatimentosApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
-
-        self.configure(fg_color=NAVY)
-        self.title("RLC Experimento")
-        self.geometry("1360x830")
-        self.minsize(1100, 700)
+        self.configure(fg_color=APP_BG)
+        self.title("Experimento — Batimentos e Ressonância")
+        self.geometry("1280x860")
+        self.minsize(1000, 700)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        # Estado
-        self._conn     = ConnectionManager()
-        self._worker: Optional[MeasurementWorker] = None
-        self._freqs:   list[float] = []
-        self._gains:   list[float] = []
-        self._results: list[dict]  = []
+        self._conn:   ConnectionManager         = ConnectionManager()
+        self._worker: Optional[CaptureWorker]   = None
+        self._last_time:    Optional[np.ndarray] = None
+        self._last_voltage: Optional[np.ndarray] = None
+        self._log_history: list[str] = []
 
-        self._build_layout()
+        self._build_ui()
         self.after(400, self._scan_thread)
 
-    # ─── Layout geral ─────────────────────────────────────────────────────────
+    # ─── Construção da UI ─────────────────────────────────────────────────────
 
-    def _build_layout(self):
-        # 4 linhas: topbar | área central | barra controle | log
-        self.grid_rowconfigure(1, weight=1)
+    def _build_ui(self):
+        self.grid_rowconfigure(2, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
         self._build_topbar()
-        self._build_center()
-        self._build_control_strip()
-        self._build_log_bar()
+        self._build_data_bar()
+        self._build_plots()
+        self._build_logbar()
 
-    # ─── Topbar ───────────────────────────────────────────────────────────────
+    # ── Topbar ────────────────────────────────────────────────────────────────
 
     def _build_topbar(self):
-        top = ctk.CTkFrame(self, fg_color=NAVY_CARD, height=52, corner_radius=0)
+        top = ctk.CTkFrame(self, fg_color=CARD_BG, height=52,
+                           corner_radius=0, border_width=0)
         top.grid(row=0, column=0, sticky="ew")
-        top.grid_columnconfigure(1, weight=1)
+        top.grid_columnconfigure(2, weight=1)
 
         # Logo
-        ctk.CTkLabel(
-            top,
-            text="  ⚡ RLC EXPERIMENTO",
-            font=ctk.CTkFont(size=17, weight="bold"),
-            text_color=CYAN,
-        ).grid(row=0, column=0, padx=18, pady=10, sticky="w")
+        ctk.CTkLabel(top, text="  ⚡ BATIMENTOS & RESSONÂNCIA",
+                     font=("Arial", 15, "bold"),
+                     text_color=CYAN).grid(row=0, column=0, padx=16, pady=10)
 
-        # Status instrumentos (centro)
-        inst = ctk.CTkFrame(top, fg_color="transparent")
-        inst.grid(row=0, column=1)
+        # Status DPO
+        self._dpo_frame = ctk.CTkFrame(top, fg_color="#1c2128",
+                                       corner_radius=6, width=260, height=32)
+        self._dpo_frame.grid(row=0, column=1, padx=10)
+        self._dpo_frame.grid_propagate(False)
+        self._dpo_dot  = ctk.CTkLabel(self._dpo_frame, text="●",
+                                      text_color=RED, font=("Arial", 14), width=20)
+        self._dpo_dot.pack(side="left", padx=(8, 2))
+        self._dpo_name = ctk.CTkLabel(self._dpo_frame,
+                                      text="DPO: Desconectado",
+                                      font=FONT_LABEL, text_color=TEXT_DIM)
+        self._dpo_name.pack(side="left", padx=2)
 
-        self._afg_badge = self._make_badge(inst, "AFG")
-        self._afg_badge.pack(side="left", padx=8)
-        self._dpo_badge = self._make_badge(inst, "DPO")
-        self._dpo_badge.pack(side="left", padx=8)
+        # Controles direita
+        ctrl = ctk.CTkFrame(top, fg_color="transparent")
+        ctrl.grid(row=0, column=3, padx=10)
+
+        # Canal
+        ctk.CTkLabel(ctrl, text="Canal:", font=FONT_LABEL,
+                     text_color=TEXT_DIM).pack(side="left", padx=(0, 4))
+        self._ch_var = ctk.StringVar(value="CH1")
+        ctk.CTkOptionMenu(ctrl, values=["CH1", "CH2", "CH3", "CH4"],
+                          variable=self._ch_var, width=70, height=28,
+                          fg_color="#1c2128", button_color="#30363d",
+                          ).pack(side="left", padx=4)
+
+        # Intervalo
+        ctk.CTkLabel(ctrl, text="Intervalo:", font=FONT_LABEL,
+                     text_color=TEXT_DIM).pack(side="left", padx=(8, 4))
+        self._interval = ctk.CTkEntry(ctrl, width=55, height=28,
+                                      fg_color="#1c2128", border_color=BORDER,
+                                      text_color=CYAN, font=FONT_MONO)
+        self._interval.pack(side="left", padx=4)
+        self._interval.insert(0, "0.5")
+        ctk.CTkLabel(ctrl, text="s", font=FONT_LABEL,
+                     text_color=TEXT_DIM).pack(side="left")
 
         # Botão conectar
-        self._btn_connect = ctk.CTkButton(
-            top, text="  CONECTAR",
-            width=130, height=32,
-            fg_color=NAVY_MID, border_color=CYAN, border_width=1,
-            text_color=CYAN, hover_color=NAVY_MID,
-            font=FONT_SECTION,
-            command=self._scan_thread,
+        ctk.CTkButton(ctrl, text="CONECTAR", width=100, height=32,
+                      fg_color="#1c2128", border_color=CYAN, border_width=1,
+                      text_color=CYAN, hover_color="#1c2128",
+                      font=FONT_SEC,
+                      command=self._scan_thread,
+                      ).pack(side="left", padx=8)
+
+        # Botão capturar
+        self._btn_cap = ctk.CTkButton(
+            ctrl, text="▶  CAPTURAR", width=120, height=32,
+            fg_color="#0d2818", border_color=GREEN, border_width=1,
+            text_color=GREEN, hover_color="#0d2818",
+            font=FONT_SEC, command=self._start_capture,
         )
-        self._btn_connect.grid(row=0, column=2, padx=18)
+        self._btn_cap.pack(side="left", padx=4)
 
-    def _make_badge(self, parent, label: str) -> ctk.CTkFrame:
-        frame = ctk.CTkFrame(parent, fg_color=NAVY_MID, corner_radius=6,
-                             width=220, height=32)
-        frame.pack_propagate(False)
-        dot  = ctk.CTkLabel(frame, text="●", text_color=MAGENTA,
-                             font=ctk.CTkFont(size=14), width=18)
-        dot.pack(side="left", padx=(8, 2))
-        name = ctk.CTkLabel(frame, text=f"{label}: Desconectado",
-                             font=FONT_LABEL, text_color=GRAY_DIM,
-                             anchor="w")
-        name.pack(side="left", padx=2, fill="x", expand=True)
-        frame._dot  = dot
-        frame._name = name
-        return frame
+        # Botão parar
+        self._btn_stop = ctk.CTkButton(
+            ctrl, text="■  PARAR", width=90, height=32,
+            fg_color="#2d0d0d", border_color=RED, border_width=1,
+            text_color=RED, hover_color="#2d0d0d",
+            font=FONT_SEC, state="disabled",
+            command=self._stop_capture,
+        )
+        self._btn_stop.pack(side="left", padx=4)
 
-    def _badge_ok(self, badge, text: str):
-        badge._dot.configure(text_color=GREEN)
-        badge._name.configure(text=text[:30], text_color=WHITE_DIM)
+        # Botão salvar CSV
+        self._btn_csv = ctk.CTkButton(
+            ctrl, text="💾", width=42, height=32,
+            fg_color="#1c2128", border_color=BORDER, border_width=1,
+            text_color=TEXT_DIM, hover_color="#1c2128",
+            state="disabled", command=self._save_csv,
+        )
+        self._btn_csv.pack(side="left", padx=4)
 
-    def _badge_err(self, badge, label: str):
-        badge._dot.configure(text_color=MAGENTA)
-        badge._name.configure(text=f"{label}: Desconectado", text_color=GRAY_DIM)
+    # ── Barra de dados ────────────────────────────────────────────────────────
 
-    def _badge_search(self, badge, label: str):
-        badge._dot.configure(text_color=AMBER)
-        badge._name.configure(text=f"{label}: Procurando…", text_color=AMBER)
+    def _build_data_bar(self):
+        bar = ctk.CTkFrame(self, fg_color=APP_BG, height=90, corner_radius=0)
+        bar.grid(row=1, column=0, sticky="ew", padx=0, pady=4)
+        bar.grid_columnconfigure((0,1,2,3,4,5), weight=1, uniform="cards")
 
-    # ─── Centro (gráfico + display) ───────────────────────────────────────────
+        self._card_T    = DataCard(bar, "Período  T",      WAVE_COLOR)
+        self._card_f    = DataCard(bar, "Frequência  f",   WAVE_COLOR)
+        self._card_f1   = DataCard(bar, "Pico  f₁",        PEAK_COLOR)
+        self._card_f2   = DataCard(bar, "Pico  f₂",        PEAK2_COLOR)
+        self._card_bat  = DataCard(bar, "Batimento  |f₁−f₂|", "#ff88ff")
+        self._card_med  = DataCard(bar, "Freq. Média  (f₁+f₂)/2", CYAN)
 
-    def _build_center(self):
-        center = ctk.CTkFrame(self, fg_color="transparent")
-        center.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
-        center.grid_rowconfigure(0, weight=1)
-        center.grid_columnconfigure(0, weight=1)   # gráfico
-        center.grid_columnconfigure(1, weight=0)   # display LCD
+        for col, card in enumerate((self._card_T, self._card_f,
+                                    self._card_f1, self._card_f2,
+                                    self._card_bat, self._card_med)):
+            card.grid(row=0, column=col, sticky="nsew", padx=4, pady=4)
 
-        self._build_plot(center)
-        self._build_lcd_panel(center)
+    # ── Gráficos ──────────────────────────────────────────────────────────────
 
-    def _build_plot(self, parent):
-        plot_outer = ctk.CTkFrame(parent, fg_color=PLOT_BG, corner_radius=0)
-        plot_outer.grid(row=0, column=0, sticky="nsew")
-        plot_outer.grid_rowconfigure(0, weight=1)
-        plot_outer.grid_columnconfigure(0, weight=1)
+    def _build_plots(self):
+        plot_frame = ctk.CTkFrame(self, fg_color=SCOPE_BG, corner_radius=0)
+        plot_frame.grid(row=2, column=0, sticky="nsew", padx=0, pady=0)
+        plot_frame.grid_rowconfigure(0, weight=1)
+        plot_frame.grid_columnconfigure(0, weight=1)
 
-        self._fig = Figure(facecolor=PLOT_BG)
-        self._ax  = self._fig.add_subplot(111)
-        self._style_axes()
+        # Figura com dois subplots empilhados (70% / 30%)
+        self._fig = Figure(facecolor=SCOPE_BG)
+        gs = GridSpec(2, 1, figure=self._fig,
+                      height_ratios=[2, 1],
+                      hspace=0.08,
+                      left=0.07, right=0.97, top=0.96, bottom=0.08)
 
-        self._canvas = FigureCanvasTkAgg(self._fig, master=plot_outer)
-        self._canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew",
-                                          padx=1, pady=1)
+        # ── Plot 1: Forma de onda ──────────────────────────────────────────
+        self._ax_wave = self._fig.add_subplot(gs[0])
+        self._style_ax(self._ax_wave,
+                       ylabel="Tensão  (V)",
+                       title="FORMA DE ONDA")
+        self._ax_wave.set_xticklabels([])       # oculta eixo X no gráfico de cima
+
+        self._ln_wave, = self._ax_wave.plot(
+            [], [], color=WAVE_COLOR, linewidth=1.2, antialiased=True)
+
+        # ── Plot 2: Espectro FFT ───────────────────────────────────────────
+        self._ax_fft = self._fig.add_subplot(gs[1])
+        self._style_ax(self._ax_fft,
+                       xlabel="Frequência  (Hz)",
+                       ylabel="Amplitude")
+        self._ax_fft.set_title("ESPECTRO FFT", color=TEXT_DIM,
+                               fontsize=9, pad=3, loc="left")
+
+        self._ln_fft, = self._ax_fft.plot(
+            [], [], color=FFT_COLOR, linewidth=1.0)
+        self._vl_f1 = self._ax_fft.axvline(
+            np.nan, color=PEAK_COLOR,  lw=1.4, ls="--", alpha=0.9)
+        self._vl_f2 = self._ax_fft.axvline(
+            np.nan, color=PEAK2_COLOR, lw=1.4, ls="--", alpha=0.9)
+
+        # Labels dos picos (criados uma vez, reposicionados a cada update)
+        self._txt_f1 = self._ax_fft.text(
+            0, 0.9, "", color=PEAK_COLOR,
+            fontsize=8, transform=self._ax_fft.get_yaxis_transform())
+        self._txt_f2 = self._ax_fft.text(
+            0, 0.75, "", color=PEAK2_COLOR,
+            fontsize=8, transform=self._ax_fft.get_yaxis_transform())
+
+        # Canvas
+        self._canvas = FigureCanvasTkAgg(self._fig, master=plot_frame)
+        self._canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
         self._canvas.draw()
 
-        # Linhas — inicializadas vazias
-        self._ln_data,  = self._ax.plot([], [], "o", color=C_DATA,
-                                        markersize=4, linewidth=0,
-                                        label="Medido", zorder=3)
-        self._ln_data2, = self._ax.plot([], [], "-", color=C_DATA,
-                                        linewidth=1.2, alpha=0.5, zorder=2)
-        self._ln_fit,   = self._ax.plot([], [], "-", color=C_FIT,
-                                        linewidth=2.2, label="Ajuste L-M",
-                                        zorder=4)
-        self._ln_theory,= self._ax.plot([], [], "--", color=C_THEORY,
-                                        linewidth=1.2, alpha=0.7,
-                                        label="Teórico", zorder=1)
-        self._vl_f0  = self._ax.axvline(np.nan, color=C_F0,  lw=1.2, ls="--",
-                                        alpha=0.85, label="f₀")
-        self._vl_f1  = self._ax.axvline(np.nan, color=C_F1F2, lw=1, ls=":",
-                                        alpha=0.8, label="f₁")
-        self._vl_f2  = self._ax.axvline(np.nan, color=C_F1F2, lw=1, ls=":",
-                                        alpha=0.8, label="f₂")
-        self._ax.legend(facecolor=NAVY_CARD, edgecolor=GRAY_DIM,
-                        labelcolor=WHITE_DIM, fontsize=9, loc="upper right")
-
-    def _style_axes(self):
-        ax = self._ax
-        ax.set_facecolor(PLOT_BG)
-        ax.tick_params(colors=GRAY_DIM, labelsize=9)
-        ax.xaxis.label.set_color(WHITE_DIM)
-        ax.yaxis.label.set_color(WHITE_DIM)
-        ax.title.set_color(WHITE_DIM)
+    def _style_ax(self, ax, xlabel="", ylabel="", title=""):
+        ax.set_facecolor(SCOPE_BG)
+        ax.tick_params(colors=TEXT_DIM, labelsize=8)
+        ax.xaxis.label.set_color(TEXT_DIM)
+        ax.yaxis.label.set_color(TEXT_DIM)
+        if xlabel: ax.set_xlabel(xlabel, labelpad=4)
+        if ylabel: ax.set_ylabel(ylabel, labelpad=4)
+        if title:  ax.set_title(title, color=TEXT_DIM, fontsize=9, pad=3, loc="left")
         for spine in ax.spines.values():
-            spine.set_edgecolor(PLOT_GRID)
-        ax.grid(True, which="both", color=PLOT_GRID, linestyle="-", linewidth=0.6)
-        ax.set_xlabel("Frequência  (Hz)", labelpad=6)
-        ax.set_ylabel("Ganho   V_out / V_in", labelpad=6)
-        ax.set_title("Resposta em Frequência — Circuito RLC Série", pad=10)
-        self._fig.tight_layout(pad=2)
+            spine.set_edgecolor(SCOPE_GRID)
+        ax.grid(True, color=SCOPE_GRID, linewidth=0.6)
 
-    # ─── Painel LCD de métricas ───────────────────────────────────────────────
+    # ── Barra de log ──────────────────────────────────────────────────────────
 
-    def _build_lcd_panel(self, parent):
-        panel = ctk.CTkFrame(parent, fg_color=NAVY, width=260, corner_radius=0)
-        panel.grid(row=0, column=1, sticky="nsew")
-        panel.grid_propagate(False)
-        panel.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(panel, text="MÉTRICAS",
-                     font=FONT_SECTION, text_color=CYAN
-                     ).pack(fill="x", padx=12, pady=(12, 4))
-        _sep(panel, GRAY_DIM).pack(fill="x", padx=12, pady=(0, 8))
-
-        # f₀
-        self._card_f0 = _LcdCard(panel, "Frequência de Ressonância", "Hz")
-        self._card_f0.pack(fill="x", padx=8, pady=4)
-
-        # Q
-        self._card_Q = _LcdCard(panel, "Fator de Qualidade", "")
-        self._card_Q.pack(fill="x", padx=8, pady=4)
-
-        # BW
-        self._card_BW = _LcdCard(panel, "Largura de Banda", "Hz")
-        self._card_BW.pack(fill="x", padx=8, pady=4)
-
-        _sep(panel, GRAY_DIM).pack(fill="x", padx=12, pady=4)
-
-        # f₁ e f₂ lado a lado
-        row_f = ctk.CTkFrame(panel, fg_color="transparent")
-        row_f.pack(fill="x", padx=8, pady=4)
-        row_f.grid_columnconfigure((0, 1), weight=1, uniform="f12")
-
-        self._card_f1 = _LcdCard(row_f, "f₁  (−3 dB)", "Hz")
-        self._card_f1.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
-        self._card_f2 = _LcdCard(row_f, "f₂  (−3 dB)", "Hz")
-        self._card_f2.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
-
-        # Override fonte menor nos cards f1/f2 (menos espaço)
-        for card in (self._card_f1, self._card_f2):
-            card._val_exp.configure(font=ctk.CTkFont(
-                family="Courier New", size=15, weight="bold"))
-
-        _sep(panel, GRAY_DIM).pack(fill="x", padx=12, pady=8)
-
-        # Nota equações
-        eq_box = ctk.CTkTextbox(panel, height=120, fg_color=NAVY_CARD,
-                                text_color=GRAY_DIM, font=FONT_MONO,
-                                state="normal", wrap="word")
-        eq_box.pack(fill="x", padx=8, pady=(0, 8))
-        eq_box.insert("1.0",
-            "f₀ = 1/(2π√LC)\n"
-            "Q  = (1/R)√(L/C)\n"
-            "BW = f₀/Q = R/(2πL)\n"
-            "H  = R/√[R²+(ωL−1/ωC)²]\n\n"
-            "Ref: RBEF/SciELO — Oscilador\n"
-            "forçado amortecido (Eq.4–7)"
-        )
-        eq_box.configure(state="disabled")
-
-    # ─── Barra de controles (horizontal, base do gráfico) ────────────────────
-
-    def _build_control_strip(self):
-        strip = ctk.CTkFrame(self, fg_color=NAVY_CARD, corner_radius=0)
-        strip.grid(row=2, column=0, sticky="ew", padx=0, pady=0)
-
-        # Organizado em grupos horizontais
-        strip.grid_columnconfigure(0, weight=0)  # componentes
-        strip.grid_columnconfigure(1, weight=0)  # separador
-        strip.grid_columnconfigure(2, weight=0)  # varredura
-        strip.grid_columnconfigure(3, weight=0)  # separador
-        strip.grid_columnconfigure(4, weight=0)  # botões + progresso
-        strip.grid_columnconfigure(5, weight=1)  # espaço
-
-        # ── Grupo 1: Componentes ─────────────────────────────────────────────
-        g1 = ctk.CTkFrame(strip, fg_color="transparent")
-        g1.grid(row=0, column=0, padx=(12, 0), pady=8, sticky="w")
-        ctk.CTkLabel(g1, text="COMPONENTES",
-                     font=FONT_SECTION, text_color=AMBER).grid(
-                         row=0, column=0, columnspan=3, sticky="w", pady=(0, 4))
-
-        self._R = _InlineEntry(g1, "R  [Ω]",   "100",  70)
-        self._L = _InlineEntry(g1, "L  [mH]",  "10",   70)
-        self._C = _InlineEntry(g1, "C  [µF]",  "0.1",  70)
-        self._R.grid(row=1, column=0, padx=4)
-        self._L.grid(row=1, column=1, padx=4)
-        self._C.grid(row=1, column=2, padx=4)
-
-        ctk.CTkLabel(g1, text="(opcional — curva teórica)",
-                     font=FONT_LABEL, text_color=GRAY_DIM).grid(
-                         row=2, column=0, columnspan=3, sticky="w")
-
-        # ── Separador ────────────────────────────────────────────────────────
-        _sep(strip, GRAY_DIM, "v").grid(row=0, column=1, sticky="ns",
-                                         padx=12, pady=6)
-
-        # ── Grupo 2: Varredura ───────────────────────────────────────────────
-        g2 = ctk.CTkFrame(strip, fg_color="transparent")
-        g2.grid(row=0, column=2, padx=(0, 0), pady=8, sticky="w")
-        ctk.CTkLabel(g2, text="VARREDURA",
-                     font=FONT_SECTION, text_color=AMBER).grid(
-                         row=0, column=0, columnspan=5, sticky="w", pady=(0, 4))
-
-        self._f_start = _InlineEntry(g2, "f início [Hz]", "100",   80)
-        self._f_stop  = _InlineEntry(g2, "f fim    [Hz]", "10000", 80)
-        self._n_steps = _InlineEntry(g2, "Pontos",        "80",    55)
-        self._v_in    = _InlineEntry(g2, "V_in [Vpp]",   "2.0",   60)
-        self._delay   = _InlineEntry(g2, "Delay [ms]",   "400",   55)
-
-        self._f_start.grid(row=1, column=0, padx=4)
-        self._f_stop .grid(row=1, column=1, padx=4)
-        self._n_steps.grid(row=1, column=2, padx=4)
-        self._v_in   .grid(row=1, column=3, padx=4)
-        self._delay  .grid(row=1, column=4, padx=4)
-
-        # ── Separador ────────────────────────────────────────────────────────
-        _sep(strip, GRAY_DIM, "v").grid(row=0, column=3, sticky="ns",
-                                         padx=12, pady=6)
-
-        # ── Grupo 3: Botões + progresso ───────────────────────────────────────
-        g3 = ctk.CTkFrame(strip, fg_color="transparent")
-        g3.grid(row=0, column=4, padx=(0, 12), pady=8, sticky="w")
-
-        ctk.CTkLabel(g3, text="AÇÕES",
-                     font=FONT_SECTION, text_color=AMBER).grid(
-                         row=0, column=0, columnspan=4, sticky="w", pady=(0, 4))
-
-        self._btn_start = ctk.CTkButton(
-            g3, text="▶  INICIAR", width=120, height=34,
-            fg_color="#003320", border_color=GREEN, border_width=1,
-            text_color=GREEN, hover_color="#004428",
-            font=FONT_SECTION,
-            command=self._start_sweep,
-        )
-        self._btn_start.grid(row=1, column=0, padx=4)
-
-        self._btn_stop = ctk.CTkButton(
-            g3, text="■  PARAR", width=100, height=34,
-            fg_color="#330010", border_color=MAGENTA, border_width=1,
-            text_color=MAGENTA, hover_color="#440018",
-            font=FONT_SECTION,
-            state="disabled",
-            command=self._stop_sweep,
-        )
-        self._btn_stop.grid(row=1, column=1, padx=4)
-
-        self._btn_csv = ctk.CTkButton(
-            g3, text="💾  CSV", width=90, height=34,
-            fg_color=NAVY_MID, border_color=CYAN, border_width=1,
-            text_color=CYAN, hover_color="#1a2a3a",
-            font=FONT_SECTION,
-            state="disabled",
-            command=self._export_csv,
-        )
-        self._btn_csv.grid(row=1, column=2, padx=4)
-
-        ctk.CTkButton(
-            g3, text="🗑", width=40, height=34,
-            fg_color=NAVY_MID, border_color=GRAY_DIM, border_width=1,
-            text_color=GRAY_DIM, hover_color="#1a2a3a",
-            command=self._clear_plot,
-        ).grid(row=1, column=3, padx=4)
-
-        # Progresso
-        self._prog_bar = ctk.CTkProgressBar(
-            g3, width=260, height=6,
-            progress_color=CYAN, fg_color=GRAY_DIM,
-        )
-        self._prog_bar.grid(row=2, column=0, columnspan=4,
-                            sticky="ew", padx=4, pady=(6, 0))
-        self._prog_bar.set(0)
-
-        self._prog_lbl = ctk.CTkLabel(
-            g3, text="Aguardando instrumentos…",
-            font=FONT_MONO, text_color=GRAY_DIM,
-        )
-        self._prog_lbl.grid(row=3, column=0, columnspan=4, sticky="w", padx=4)
-
-    # ─── Barra de log ─────────────────────────────────────────────────────────
-
-    def _build_log_bar(self):
-        bar = ctk.CTkFrame(self, fg_color=NAVY_MID, height=22, corner_radius=0)
+    def _build_logbar(self):
+        bar = ctk.CTkFrame(self, fg_color=CARD_BG, height=22, corner_radius=0)
         bar.grid(row=3, column=0, sticky="ew")
         bar.grid_columnconfigure(1, weight=1)
         bar.grid_propagate(False)
 
         ctk.CTkLabel(bar, text=" LOG ", font=FONT_LABEL,
-                     text_color=GRAY_DIM,
-                     fg_color=NAVY_CARD).grid(row=0, column=0, sticky="ns")
-
-        self._log_lbl = ctk.CTkLabel(
-            bar, text="Iniciando…", font=FONT_MONO,
-            text_color=WHITE_DIM, anchor="w",
-        )
+                     text_color=TEXT_DIM,
+                     fg_color="#0d1117").grid(row=0, column=0, sticky="ns")
+        self._log_lbl = ctk.CTkLabel(bar, text="Iniciando…",
+                                     font=FONT_MONO, text_color=TEXT_MAIN,
+                                     anchor="w")
         self._log_lbl.grid(row=0, column=1, sticky="ew", padx=8)
+        self._log_lbl.bind("<Button-1>", lambda _: self._show_log())
+        bar.bind("<Button-1>",           lambda _: self._show_log())
 
-        # Histórico completo (popup on click)
-        self._log_history: list[str] = []
-        bar.bind("<Button-1>", lambda _: self._show_log_popup())
-        self._log_lbl.bind("<Button-1>", lambda _: self._show_log_popup())
-        ctk.CTkLabel(bar, text=" 📋 ", font=FONT_LABEL,
-                     text_color=GRAY_DIM).grid(row=0, column=2, padx=4)
-
-    def _show_log_popup(self):
+    def _show_log(self):
         pop = ctk.CTkToplevel(self)
-        pop.title("Histórico de Log")
-        pop.geometry("700x400")
-        pop.configure(fg_color=NAVY)
-        txt = ctk.CTkTextbox(pop, fg_color=NAVY_CARD, text_color=WHITE_DIM,
-                             font=FONT_MONO, state="normal")
+        pop.title("Log")
+        pop.geometry("700x360")
+        pop.configure(fg_color=APP_BG)
+        txt = ctk.CTkTextbox(pop, fg_color=CARD_BG, text_color=TEXT_MAIN,
+                             font=FONT_MONO)
         txt.pack(fill="both", expand=True, padx=8, pady=8)
         txt.insert("1.0", "\n".join(self._log_history))
         txt.configure(state="disabled")
@@ -510,9 +318,8 @@ class RLCApp(ctk.CTk):
     # ─── Conexão ──────────────────────────────────────────────────────────────
 
     def _scan_thread(self):
-        self._badge_search(self._afg_badge, "AFG")
-        self._badge_search(self._dpo_badge, "DPO")
-        self._btn_connect.configure(state="disabled")
+        self._dpo_dot.configure(text_color=AMBER)
+        self._dpo_name.configure(text="DPO: Procurando…", text_color=AMBER)
         self._log("Escaneando recursos VISA…")
         threading.Thread(target=self._do_scan, daemon=True).start()
 
@@ -521,233 +328,124 @@ class RLCApp(ctk.CTk):
         self.after(0, lambda: self._apply_scan(s))
 
     def _apply_scan(self, s: dict):
-        self._btn_connect.configure(state="normal")
-        if s["afg_connected"]:
-            self._badge_ok(self._afg_badge, f"AFG  {s['afg_name'][:22]}")
-            self._log(f"AFG ✓  {s['afg_name']}")
-        else:
-            self._badge_err(self._afg_badge, "AFG")
-            self._log("AFG ✗  não encontrado", warn=True)
-
         if s["dpo_connected"]:
-            self._badge_ok(self._dpo_badge, f"DPO  {s['dpo_name'][:22]}")
+            self._dpo_dot.configure(text_color=GREEN)
+            self._dpo_name.configure(
+                text=f"DPO: {s['dpo_name'][:28]}", text_color=TEXT_MAIN)
             self._log(f"DPO ✓  {s['dpo_name']}")
         else:
-            self._badge_err(self._dpo_badge, "DPO")
-            self._log("DPO ✗  não encontrado", warn=True)
-
+            self._dpo_dot.configure(text_color=RED)
+            self._dpo_name.configure(text="DPO: Não encontrado", text_color=TEXT_DIM)
+            self._log("DPO ✗  não encontrado. Verifique o cabo USB/GPIB.", warn=True)
         for e in s["errors"]:
             self._log(f"⚠  {e}", warn=True)
 
-        if not self._conn.ready:
-            self._log("Conecte os instrumentos via USB/GPIB e clique CONECTAR.", warn=True)
+    # ─── Captura ──────────────────────────────────────────────────────────────
 
-    # ─── Varredura ────────────────────────────────────────────────────────────
-
-    def _start_sweep(self):
+    def _start_capture(self):
         if not self._conn.ready:
-            self._log("✗  Instrumentos não conectados.", err=True)
+            self._log("✗  Conecte o osciloscópio antes de capturar.", err=True)
             return
 
         try:
-            f_start = float(self._f_start.get())
-            f_stop  = float(self._f_stop.get())
-            n_steps = int(self._n_steps.get())
-            v_in    = float(self._v_in.get())
-            delay   = int(self._delay.get())
-        except ValueError as exc:
-            self._log(f"✗  Parâmetro inválido: {exc}", err=True)
-            return
+            interval = float(self._interval.get())
+            if interval < 0.1:
+                interval = 0.1
+        except ValueError:
+            interval = 0.5
 
-        if not (0 < f_start < f_stop) or n_steps < 5 or v_in <= 0:
-            self._log("✗  Verifique os parâmetros de varredura.", err=True)
-            return
+        ch = int(self._ch_var.get().replace("CH", ""))
 
-        self._freqs.clear()
-        self._gains.clear()
-        self._results.clear()
-        self._reset_lines()
-        self._plot_theory()
-
-        self._btn_start.configure(state="disabled")
+        self._btn_cap.configure(state="disabled")
         self._btn_stop.configure(state="normal")
         self._btn_csv.configure(state="disabled")
-        self._prog_bar.set(0)
-        self._prog_lbl.configure(text="Iniciando varredura…", text_color=CYAN)
+        self._log(f"▶  Capturando CH{ch} a cada {interval:.1f} s…")
 
-        self._log(f"▶  {f_start} Hz → {f_stop} Hz  ·  {n_steps} pts  ·  {v_in} Vpp")
-
-        self._worker = MeasurementWorker(
+        self._worker = CaptureWorker(
             conn_manager=self._conn,
-            f_start=f_start, f_stop=f_stop, n_steps=n_steps,
-            v_in=v_in, delay_ms=delay,
-            on_step=self._cb_step,
-            on_finish=self._cb_finish,
+            channel=ch,
+            interval=interval,
+            on_capture=self._cb_capture,
             on_error=self._cb_error,
         )
         self._worker.start()
 
-    def _stop_sweep(self):
+    def _stop_capture(self):
         if self._worker and self._worker.is_alive():
             self._worker.stop()
-        self._log("■  Varredura interrompida.", warn=True)
+        self._btn_cap.configure(state="normal")
+        self._btn_stop.configure(state="disabled")
+        if self._last_voltage is not None:
+            self._btn_csv.configure(state="normal")
+        self._log("■  Captura encerrada.")
 
     # ── Callbacks do worker ───────────────────────────────────────────────────
 
-    def _cb_step(self, freq, vin_m, vout_m, gain, progress):
-        self.after(0, lambda: self._gui_step(freq, gain, progress))
-
-    def _cb_finish(self, results):
-        self.after(0, lambda: self._gui_finish(results))
+    def _cb_capture(self, time_arr, voltage_arr, metrics):
+        self.after(0, lambda: self._gui_update(time_arr, voltage_arr, metrics))
 
     def _cb_error(self, msg):
         self.after(0, lambda: self._log(f"✗  {msg}", err=True))
 
-    def _gui_step(self, freq: float, gain: float, progress: float):
-        self._freqs.append(freq)
-        self._gains.append(gain)
+    # ── Atualização da GUI ────────────────────────────────────────────────────
 
-        x = np.array(self._freqs)
-        y = np.array(self._gains)
-        self._ln_data.set_data(x, y)
-        self._ln_data2.set_data(x, y)
+    def _gui_update(self, t, v, m: dict):
+        self._last_time    = t
+        self._last_voltage = v
 
-        if len(x) > 1:
-            self._ax.set_xscale("log")
-            self._ax.relim()
-            self._ax.autoscale_view()
+        # ── Cards de dados ──────────────────────────────────────────────────
+        self._card_T  .update(calc.fmt_time(m["T"]))
+        self._card_f  .update(calc.fmt_hz(m["f"]))
+        self._card_f1 .update(calc.fmt_hz(m["f1"]))
+        self._card_f2 .update(calc.fmt_hz(m["f2"]))
+        self._card_bat.update(calc.fmt_hz(m["f_bat"]))
+        self._card_med.update(calc.fmt_hz(m["f_med"]))
+
+        # ── Forma de onda ───────────────────────────────────────────────────
+        self._ln_wave.set_data(t * 1e3, v)      # tempo em ms no eixo X
+        self._ax_wave.relim()
+        self._ax_wave.autoscale_view()
+        self._ax_wave.set_xlabel("Tempo  (ms)", color=TEXT_DIM, labelpad=4)
+
+        # Grade de referência em y=0
+        self._ax_wave.axhline(0, color=SCOPE_GRID, linewidth=0.8, linestyle="-")
+
+        # ── FFT ─────────────────────────────────────────────────────────────
+        freqs = m["freqs"]
+        amps  = m["amps"]
+
+        # Limita exibição a 0–2000 Hz (faixa dos diapasões)
+        mask = freqs <= 2000
+        self._ln_fft.set_data(freqs[mask], amps[mask])
+        self._ax_fft.relim()
+        self._ax_fft.autoscale_view()
+        self._ax_fft.set_xlim(0, 2000)
+
+        # Linhas verticais dos picos
+        if m["f1"] > 0:
+            self._vl_f1.set_xdata([m["f1"], m["f1"]])
+            self._txt_f1.set_text(f"f₁={calc.fmt_hz(m['f1'])}")
+            self._txt_f1.set_x(m["f1"] / 2000)
+        if m["f2"] > 0:
+            self._vl_f2.set_xdata([m["f2"], m["f2"]])
+            self._txt_f2.set_text(f"f₂={calc.fmt_hz(m['f2'])}")
+            self._txt_f2.set_x(m["f2"] / 2000)
 
         self._canvas.draw_idle()
 
-        pct = int(progress * 100)
-        self._prog_bar.set(progress)
-        self._prog_lbl.configure(
-            text=f"{pct}%  —  {freq:.1f} Hz  |  ganho={gain:.3f}",
-            text_color=CYAN,
-        )
+    # ─── Salvar CSV ───────────────────────────────────────────────────────────
 
-    def _gui_finish(self, results: list[dict]):
-        self._results = results
-        self._btn_start.configure(state="normal")
-        self._btn_stop.configure(state="disabled")
-        self._prog_bar.set(1.0)
-
-        if results:
-            self._btn_csv.configure(state="normal")
-            self._log(f"✓  Concluído — {len(results)} pontos coletados.")
-            self._prog_lbl.configure(
-                text=f"Concluído — {len(results)} pontos.",
-                text_color=GREEN,
-            )
-            self._fit_and_update()
-        else:
-            self._log("⚠  Nenhum dado coletado.", warn=True)
-            self._prog_lbl.configure(text="Sem dados.", text_color=AMBER)
-
-    # ─── Gráfico ──────────────────────────────────────────────────────────────
-
-    def _reset_lines(self):
-        for ln in (self._ln_data, self._ln_data2, self._ln_fit, self._ln_theory):
-            ln.set_data([], [])
-        for vl in (self._vl_f0, self._vl_f1, self._vl_f2):
-            vl.set_xdata([np.nan])
-        self._canvas.draw_idle()
-
-    def _plot_theory(self):
-        """Curva teórica cinza a partir de R, L, C."""
-        try:
-            R = self._R.get_float()
-            L = self._L.get_float() * 1e-3
-            C = self._C.get_float() * 1e-6
-        except Exception:
-            return
-        if not (R > 0 and L > 0 and C > 0):
-            return
-
-        fs = self._f_start.get_float(100)
-        fe = self._f_stop.get_float(10000)
-        fv = np.logspace(np.log10(fs), np.log10(fe), 500)
-        H  = calc.transfer_function(fv, R, L, C)
-
-        self._ln_theory.set_data(fv, H)
-        self._ax.set_xscale("log")
-        self._canvas.draw_idle()
-
-        # Atualiza métricas teóricas já
-        m = calc.compute_metrics_from_components(R, L, C)
-        self._card_f0.update(teo=m["f0"])
-        self._card_Q .update(teo=m["Q"])
-        self._card_BW.update(teo=m["BW"])
-        self._card_f1.update(teo=m["f1"])
-        self._card_f2.update(teo=m["f2"])
-
-    def _fit_and_update(self):
-        if len(self._freqs) < 5:
-            return
-
-        f = np.array(self._freqs)
-        g = np.array(self._gains)
-
-        fit = calc.fit_experimental_curve(f, g)
-
-        teo: Optional[dict] = None
-        try:
-            R = self._R.get_float()
-            L = self._L.get_float() * 1e-3
-            C = self._C.get_float() * 1e-6
-            if R > 0 and L > 0 and C > 0:
-                teo = calc.compute_metrics_from_components(R, L, C)
-        except Exception:
-            pass
-
-        if fit:
-            self._ln_fit.set_data(fit["freq_smooth"], fit["gain_smooth"])
-            self._vl_f0.set_xdata([fit["f0"], fit["f0"]])
-            self._vl_f1.set_xdata([fit["f1"], fit["f1"]])
-            self._vl_f2.set_xdata([fit["f2"], fit["f2"]])
-
-            self._ax.legend(facecolor=NAVY_CARD, edgecolor=GRAY_DIM,
-                            labelcolor=WHITE_DIM, fontsize=9, loc="upper right")
-            self._canvas.draw_idle()
-
-            self._card_f0.update(fit["f0"], teo["f0"] if teo else None)
-            self._card_Q .update(fit["Q"],  teo["Q"]  if teo else None)
-            self._card_BW.update(fit["BW"], teo["BW"] if teo else None)
-            self._card_f1.update(fit["f1"], teo["f1"] if teo else None)
-            self._card_f2.update(fit["f2"], teo["f2"] if teo else None)
-
-            self._log(
-                f"Ajuste → f₀={calc.fmt_hz(fit['f0'])}  "
-                f"Q={fit['Q']:.3f}  BW={calc.fmt_hz(fit['BW'])}"
-            )
-
-    # ─── Exportar CSV ─────────────────────────────────────────────────────────
-
-    def _export_csv(self):
-        if not self._results:
+    def _save_csv(self):
+        if self._last_time is None:
             return
         ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = Path(f"rlc_{ts}.csv")
+        path = Path(f"captura_{ts}.csv")
         with open(path, "w", newline="", encoding="utf-8") as fh:
-            w = csv.DictWriter(fh, fieldnames=["freq", "v_in", "v_out", "gain"])
-            w.writeheader()
-            w.writerows(self._results)
+            w = csv.writer(fh)
+            w.writerow(["tempo_s", "tensao_v"])
+            for t, v in zip(self._last_time, self._last_voltage):
+                w.writerow([f"{t:.9f}", f"{v:.6f}"])
         self._log(f"💾  Salvo: {path.resolve()}")
-
-    # ─── Limpar ───────────────────────────────────────────────────────────────
-
-    def _clear_plot(self):
-        self._freqs.clear()
-        self._gains.clear()
-        self._results.clear()
-        self._reset_lines()
-        for card in (self._card_f0, self._card_Q,
-                     self._card_BW, self._card_f1, self._card_f2):
-            card.update()
-        self._prog_bar.set(0)
-        self._prog_lbl.configure(text="Gráfico limpo.", text_color=GRAY_DIM)
-        self._btn_csv.configure(state="disabled")
-        self._canvas.draw_idle()
 
     # ─── Log ──────────────────────────────────────────────────────────────────
 
@@ -755,8 +453,8 @@ class RLCApp(ctk.CTk):
         ts   = datetime.now().strftime("%H:%M:%S")
         line = f"[{ts}]  {msg}"
         self._log_history.append(line)
-        color = MAGENTA if err else (AMBER if warn else WHITE_DIM)
-        self._log_lbl.configure(text=line[-110:], text_color=color)
+        color = RED if err else (AMBER if warn else TEXT_MAIN)
+        self._log_lbl.configure(text=line[-115:], text_color=color)
 
     # ─── Fechar ───────────────────────────────────────────────────────────────
 
