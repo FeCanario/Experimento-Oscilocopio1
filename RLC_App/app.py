@@ -272,17 +272,40 @@ class BatimentosApp(ctk.CTk):
                      corner_radius=0).grid(row=0, column=0,
                                            sticky="sew", padx=0)
 
-    # ─── Corpo (métricas + gráficos) ──────────────────────────────────────────
+    # ─── Corpo (abas) ─────────────────────────────────────────────────────────
 
     def _build_body(self):
-        body = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
-        body.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
-        body.grid_rowconfigure(0, weight=1)
-        body.grid_columnconfigure(0, weight=0)   # painel métricas fixo
-        body.grid_columnconfigure(1, weight=1)   # gráficos expandem
+        self._tabs = ctk.CTkTabview(
+            self,
+            fg_color=APP_BG,
+            segmented_button_fg_color=PANEL_BG,
+            segmented_button_selected_color=ACCENT,
+            segmented_button_selected_hover_color="#0090b0",
+            segmented_button_unselected_color=PANEL_BG,
+            segmented_button_unselected_hover_color=CARD_BG,
+            text_color=TEXT_H,
+            corner_radius=0,
+        )
+        self._tabs.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
+        self._tabs.grid_columnconfigure(0, weight=1)
+        self._tabs.grid_rowconfigure(0, weight=1)
 
-        self._build_metric_panel(body)
-        self._build_plot_panel(body)
+        self._tabs.add("  Medição  ")
+        self._tabs.add("  Configurar Scope  ")
+
+        # Aba 1 — Medição
+        tab1 = self._tabs.tab("  Medição  ")
+        tab1.grid_rowconfigure(0, weight=1)
+        tab1.grid_columnconfigure(0, weight=0)
+        tab1.grid_columnconfigure(1, weight=1)
+        self._build_metric_panel(tab1)
+        self._build_plot_panel(tab1)
+
+        # Aba 2 — Configuração do scope
+        tab2 = self._tabs.tab("  Configurar Scope  ")
+        tab2.grid_rowconfigure(0, weight=1)
+        tab2.grid_columnconfigure(0, weight=1)
+        self._build_scope_config(tab2)
 
     # ── Painel de métricas (esquerda) ─────────────────────────────────────────
 
@@ -402,6 +425,300 @@ class BatimentosApp(ctk.CTk):
         for spine in ax.spines.values():
             spine.set_edgecolor(SCOPE_GRID)
         ax.grid(True, color=SCOPE_GRID, lw=0.6, linestyle="-")
+
+    # ─── Aba 2: Configurar Scope (DPO 2012B) ─────────────────────────────────
+
+    def _build_scope_config(self, parent):
+        scroll = ctk.CTkScrollableFrame(parent, fg_color=APP_BG, corner_radius=0)
+        scroll.grid(row=0, column=0, sticky="nsew")
+        scroll.grid_columnconfigure((0, 1, 2), weight=1, uniform="col")
+
+        def section(text, row, col, colspan=1):
+            f = ctk.CTkFrame(scroll, fg_color=PANEL_BG,
+                             corner_radius=10, border_width=1,
+                             border_color=BORDER)
+            f.grid(row=row, column=col, columnspan=colspan,
+                   sticky="nsew", padx=8, pady=8)
+            ctk.CTkLabel(f, text=text, font=("Arial", 12, "bold"),
+                         text_color=ACCENT, anchor="w"
+                         ).pack(fill="x", padx=14, pady=(12, 6))
+            ctk.CTkFrame(f, fg_color=BORDER, height=1,
+                         corner_radius=0).pack(fill="x", padx=14, pady=(0, 10))
+            return f
+
+        def row_field(parent, label, widget_factory):
+            r = ctk.CTkFrame(parent, fg_color="transparent")
+            r.pack(fill="x", padx=14, pady=3)
+            ctk.CTkLabel(r, text=label, font=F_LABEL,
+                         text_color=TEXT_S, width=150, anchor="w"
+                         ).pack(side="left")
+            w = widget_factory(r)
+            w.pack(side="left", padx=(8, 0))
+            return w
+
+        def entry(parent, default="", width=100):
+            e = ctk.CTkEntry(parent, width=width, height=28,
+                             fg_color=CARD_BG, border_color=BORDER,
+                             text_color=ACCENT, font=F_MONO)
+            e.insert(0, default)
+            return e
+
+        def optmenu(parent, values, width=130):
+            return ctk.CTkOptionMenu(parent, values=values, width=width,
+                                     height=28, fg_color=CARD_BG,
+                                     button_color=BORDER,
+                                     dropdown_fg_color=CARD_BG,
+                                     text_color=ACCENT, font=F_MONO)
+
+        # ── Cabeçalho do modelo ────────────────────────────────────────────
+        hdr = ctk.CTkFrame(scroll, fg_color=CARD_BG, corner_radius=10,
+                           border_width=1, border_color=BORDER)
+        hdr.grid(row=0, column=0, columnspan=3, sticky="ew", padx=8, pady=(10, 0))
+        ctk.CTkLabel(hdr,
+                     text="Tektronix DPO 2012B  —  Digital Phosphor Oscilloscope  "
+                          "·  100 MHz  ·  1 GS/s  ·  2 canais",
+                     font=("Courier New", 12, "bold"), text_color=TEXT_H,
+                     ).pack(padx=16, pady=10)
+
+        # ── Seção Horizontal (Timebase) ────────────────────────────────────
+        s_tb = section("⏱  Horizontal  (Timebase)", row=1, col=0)
+
+        TB_SCALES = ["1ns", "2ns", "5ns", "10ns", "20ns", "50ns",
+                     "100ns", "200ns", "500ns",
+                     "1µs", "2µs", "5µs", "10µs", "20µs", "50µs",
+                     "100µs", "200µs", "500µs",
+                     "1ms", "2ms", "5ms", "10ms", "20ms", "50ms",
+                     "100ms", "200ms", "500ms",
+                     "1s", "2s", "5s", "10s", "25s", "50s"]
+        TB_MAP = {
+            "1ns":1e-9,"2ns":2e-9,"5ns":5e-9,"10ns":10e-9,"20ns":20e-9,
+            "50ns":50e-9,"100ns":100e-9,"200ns":200e-9,"500ns":500e-9,
+            "1µs":1e-6,"2µs":2e-6,"5µs":5e-6,"10µs":10e-6,"20µs":20e-6,
+            "50µs":50e-6,"100µs":100e-6,"200µs":200e-6,"500µs":500e-6,
+            "1ms":1e-3,"2ms":2e-3,"5ms":5e-3,"10ms":10e-3,"20ms":20e-3,
+            "50ms":50e-3,"100ms":100e-3,"200ms":200e-3,"500ms":500e-3,
+            "1s":1.0,"2s":2.0,"5s":5.0,"10s":10.0,"25s":25.0,"50s":50.0,
+        }
+        self._tb_map = TB_MAP
+
+        self._tb_scale = row_field(s_tb, "Escala  (s/div)",
+                                   lambda p: optmenu(p, TB_SCALES, 130))
+        self._tb_scale.set("1ms")
+
+        self._rec_len = row_field(s_tb, "Record Length",
+                                  lambda p: optmenu(p, ["1000","10000",
+                                                        "100000","1000000"], 130))
+        self._rec_len.set("10000")
+
+        # ── Seção Canal 1 ──────────────────────────────────────────────────
+        s_ch1 = section("📡  Canal 1  (CH1)", row=1, col=1)
+        self._ch1_scale, self._ch1_coup, self._ch1_bw = \
+            self._build_channel_section(s_ch1, row_field, entry, optmenu)
+
+        # ── Seção Canal 2 ──────────────────────────────────────────────────
+        s_ch2 = section("📡  Canal 2  (CH2)", row=1, col=2)
+        self._ch2_scale, self._ch2_coup, self._ch2_bw = \
+            self._build_channel_section(s_ch2, row_field, entry, optmenu)
+
+        # ── Seção Trigger ──────────────────────────────────────────────────
+        s_tr = section("⚡  Trigger", row=2, col=0)
+
+        self._trig_src = row_field(s_tr, "Fonte",
+                                   lambda p: optmenu(p, ["CH1","CH2","EXT"], 100))
+        self._trig_src.set("CH1")
+
+        self._trig_slope = row_field(s_tr, "Borda",
+                                     lambda p: optmenu(p, ["RISE","FALL"], 100))
+        self._trig_slope.set("RISE")
+
+        self._trig_level = row_field(s_tr, "Nível  (V)",
+                                     lambda p: entry(p, "0.0", 80))
+
+        self._trig_mode = row_field(s_tr, "Modo",
+                                    lambda p: optmenu(p, ["AUTO","NORMal"], 100))
+        self._trig_mode.set("AUTO")
+
+        # ── Seção Aquisição ────────────────────────────────────────────────
+        s_aq = section("🔬  Aquisição", row=2, col=1)
+
+        self._acq_mode = row_field(s_aq, "Modo",
+                                   lambda p: optmenu(p,
+                                       ["SAMple","PEAKdetect","AVErage","HIRes"], 130))
+        self._acq_mode.set("SAMple")
+
+        self._acq_avg = row_field(s_aq, "Nº Médias (Average)",
+                                  lambda p: optmenu(p,
+                                      ["2","4","8","16","32","64","128","256","512"], 80))
+        self._acq_avg.set("16")
+
+        # ── Botões de ação ─────────────────────────────────────────────────
+        s_ac = section("🎛  Ações", row=2, col=2)
+
+        _btn(s_ac, "✅  Aplicar Configurações",
+             ACCENT, "#0090b0", APP_BG,
+             width=220, height=36,
+             command=self._apply_scope_config,
+             ).pack(padx=14, pady=6, anchor="w")
+
+        _btn(s_ac, "📥  Ler do Scope",
+             "#2d6a4f", "#1b4332", TEXT_H,
+             width=220, height=36,
+             command=self._read_scope_config,
+             ).pack(padx=14, pady=6, anchor="w")
+
+        _ghost_btn(s_ac, "🔄  AutoSet",
+                   BORDER, TEXT_S,
+                   width=220, height=36,
+                   command=self._do_autoset,
+                   ).pack(padx=14, pady=6, anchor="w")
+
+        # Status da última operação
+        ctk.CTkFrame(s_ac, fg_color=BORDER, height=1,
+                     corner_radius=0).pack(fill="x", padx=14, pady=(10, 6))
+        self._cfg_status = ctk.CTkLabel(s_ac, text="Aguardando…",
+                                         font=F_MONO, text_color=TEXT_D,
+                                         anchor="w")
+        self._cfg_status.pack(fill="x", padx=14, pady=(0, 12))
+
+    def _build_channel_section(self, frame, row_field, entry, optmenu):
+        """Campos comuns de configuração de canal (escala, coupling, BW)."""
+        V_SCALES = ["1mV","2mV","5mV","10mV","20mV","50mV",
+                    "100mV","200mV","500mV",
+                    "1V","2V","5V","10V"]
+        V_MAP = {
+            "1mV":1e-3,"2mV":2e-3,"5mV":5e-3,"10mV":10e-3,"20mV":20e-3,
+            "50mV":50e-3,"100mV":100e-3,"200mV":200e-3,"500mV":500e-3,
+            "1V":1.0,"2V":2.0,"5V":5.0,"10V":10.0,
+        }
+        if not hasattr(self, "_vscale_map"):
+            self._vscale_map = V_MAP
+
+        scale = row_field(frame, "Escala  (V/div)",
+                          lambda p: optmenu(p, V_SCALES, 110))
+        scale.set("1V")
+
+        coup = row_field(frame, "Acoplamento",
+                         lambda p: optmenu(p, ["DC","AC","GND"], 100))
+        coup.set("DC")
+
+        bw = row_field(frame, "Largura de Banda",
+                       lambda p: optmenu(p, ["FULl (100MHz)","TWEnty (20MHz)"], 160))
+        bw.set("FULl (100MHz)")
+
+        return scale, coup, bw
+
+    def _apply_scope_config(self):
+        """Envia todas as configurações para o DPO 2012B."""
+        if not self._conn.ready:
+            self._cfg_status.configure(
+                text="✗  Scope não conectado.", text_color=RED_C)
+            return
+
+        dpo = self._conn.dpo
+        try:
+            # Timebase
+            tb_str = self._tb_scale.get()
+            tb_val = self._tb_map.get(tb_str, 1e-3)
+            dpo.set_timebase_scale(tb_val)
+            dpo.set_record_length(int(self._rec_len.get()))
+
+            # CH1
+            ch1_v = self._vscale_map.get(self._ch1_scale.get(), 1.0)
+            dpo.set_ch_scale(1, ch1_v)
+            dpo.set_ch_coupling(1, self._ch1_coup.get())
+            dpo.set_ch_bandwidth(1, self._ch1_bw.get().split()[0])
+
+            # CH2
+            ch2_v = self._vscale_map.get(self._ch2_scale.get(), 1.0)
+            dpo.set_ch_scale(2, ch2_v)
+            dpo.set_ch_coupling(2, self._ch2_coup.get())
+            dpo.set_ch_bandwidth(2, self._ch2_bw.get().split()[0])
+
+            # Trigger
+            dpo.set_trigger_source(self._trig_src.get())
+            dpo.set_trigger_slope(self._trig_slope.get())
+            dpo.set_trigger_level(float(self._trig_level.get() or 0))
+            dpo.set_trigger_mode(self._trig_mode.get())
+
+            # Aquisição
+            dpo.set_acquire_mode(self._acq_mode.get())
+            if self._acq_mode.get() == "AVErage":
+                dpo.set_acquire_numavg(int(self._acq_avg.get()))
+
+            self._cfg_status.configure(
+                text=f"✅  Configurações aplicadas  [{datetime.now().strftime('%H:%M:%S')}]",
+                text_color=GREEN_C)
+            self._log("✅  Configurações do scope aplicadas com sucesso.")
+
+        except Exception as exc:
+            self._cfg_status.configure(
+                text=f"✗  Erro: {exc}", text_color=RED_C)
+            self._log(f"✗  Erro ao configurar scope: {exc}", err=True)
+
+    def _read_scope_config(self):
+        """Lê as configurações atuais do scope e preenche os campos."""
+        if not self._conn.ready:
+            self._cfg_status.configure(
+                text="✗  Scope não conectado.", text_color=RED_C)
+            return
+
+        try:
+            s = self._conn.dpo.read_all_settings()
+
+            # Timebase — encontra a chave mais próxima no mapa
+            tb_closest = min(self._tb_map, key=lambda k: abs(self._tb_map[k] - s["tb_scale"]))
+            self._tb_scale.set(tb_closest)
+            self._rec_len.set(str(s["rec_length"]))
+
+            # CH1
+            v1_closest = min(self._vscale_map, key=lambda k: abs(self._vscale_map[k] - s["ch1_scale"]))
+            self._ch1_scale.set(v1_closest)
+            self._ch1_coup.set(s["ch1_coup"][:2])
+
+            # CH2
+            v2_closest = min(self._vscale_map, key=lambda k: abs(self._vscale_map[k] - s["ch2_scale"]))
+            self._ch2_scale.set(v2_closest)
+            self._ch2_coup.set(s["ch2_coup"][:2])
+
+            # Trigger
+            self._trig_src.set(s["trig_src"])
+            self._trig_level.delete(0, "end")
+            self._trig_level.insert(0, f"{s['trig_lvl']:.3f}")
+            self._trig_mode.set(s["trig_mode"][:4])
+
+            # Aquisição
+            self._acq_mode.set(s["acq_mode"][:3])
+
+            self._cfg_status.configure(
+                text=f"📥  Lido do scope  [{datetime.now().strftime('%H:%M:%S')}]",
+                text_color=ACCENT)
+            self._log("📥  Configurações lidas do scope.")
+
+        except Exception as exc:
+            self._cfg_status.configure(
+                text=f"✗  Erro: {exc}", text_color=RED_C)
+            self._log(f"✗  Erro ao ler scope: {exc}", err=True)
+
+    def _do_autoset(self):
+        """Executa AutoSet no scope."""
+        if not self._conn.ready:
+            self._cfg_status.configure(
+                text="✗  Scope não conectado.", text_color=RED_C)
+            return
+        self._cfg_status.configure(text="🔄  Executando AutoSet…", text_color=AMBER_C)
+        self._log("🔄  AutoSet executando (aguarde ~3s)…")
+
+        def _run():
+            try:
+                self._conn.dpo.autoset()
+                self.after(0, lambda: self._cfg_status.configure(
+                    text="✅  AutoSet concluído.", text_color=GREEN_C))
+                self.after(0, lambda: self._log("✅  AutoSet concluído."))
+            except Exception as exc:
+                self.after(0, lambda: self._cfg_status.configure(
+                    text=f"✗  {exc}", text_color=RED_C))
+
+        threading.Thread(target=_run, daemon=True).start()
 
     # ─── Barra de log ─────────────────────────────────────────────────────────
 

@@ -148,6 +148,115 @@ class TektronixDPO(InstrumentDriver):
         self.write("AUTOSet EXECute")
         import time; time.sleep(3.0)
 
+    # ── Configuração horizontal (timebase) ───────────────────────────────────
+
+    def set_timebase_scale(self, scale: float):
+        """Escala horizontal em s/div. DPO2012B: 1ns/div a 50s/div."""
+        self.write(f"HORizontal:SCAle {scale:.10f}")
+
+    def set_record_length(self, length: int):
+        """Comprimento do registro. DPO2012B: 1000, 10000, 100000, 1000000."""
+        self.write(f"HORizontal:RECOrdlength {length}")
+
+    def get_timebase_scale(self) -> float:
+        try: return float(self.query("HORizontal:SCAle?"))
+        except: return 0.0
+
+    def get_record_length(self) -> int:
+        try: return int(float(self.query("HORizontal:RECOrdlength?")))
+        except: return 0
+
+    # ── Configuração vertical (canal) ────────────────────────────────────────
+
+    def set_ch_scale(self, ch: int, scale: float):
+        """Escala vertical em V/div."""
+        self.write(f"CH{ch}:SCAle {scale:.6f}")
+
+    def set_ch_coupling(self, ch: int, coupling: str):
+        """Acoplamento: AC | DC | GND."""
+        self.write(f"CH{ch}:COUPling {coupling}")
+
+    def set_ch_bandwidth(self, ch: int, bw: str):
+        """Largura de banda: TWEnty (20MHz) | FULl (100MHz)."""
+        self.write(f"CH{ch}:BANdwidth {bw}")
+
+    def set_ch_position(self, ch: int, pos: float):
+        """Posição vertical em divisões."""
+        self.write(f"CH{ch}:POSition {pos:.3f}")
+
+    def get_ch_scale(self, ch: int) -> float:
+        try: return float(self.query(f"CH{ch}:SCAle?"))
+        except: return 0.0
+
+    def get_ch_coupling(self, ch: int) -> str:
+        try: return self.query(f"CH{ch}:COUPling?")
+        except: return "DC"
+
+    def get_ch_bandwidth(self, ch: int) -> str:
+        try: return self.query(f"CH{ch}:BANdwidth?")
+        except: return "FUL"
+
+    # ── Trigger ──────────────────────────────────────────────────────────────
+
+    def set_trigger_source(self, source: str):
+        """Fonte do trigger: CH1 | CH2 | EXT."""
+        self.write(f"TRIGger:A:EDGE:SOUrce {source}")
+
+    def set_trigger_slope(self, slope: str):
+        """Borda do trigger: RISE | FALL."""
+        self.write(f"TRIGger:A:EDGE:SLOpe {slope}")
+
+    def set_trigger_level(self, level: float):
+        """Nível do trigger em Volts."""
+        self.write(f"TRIGger:A:LEVel {level:.4f}")
+
+    def set_trigger_mode(self, mode: str):
+        """Modo do trigger: AUTO | NORMal."""
+        self.write(f"TRIGger:A:MODe {mode}")
+
+    def get_trigger_source(self) -> str:
+        try: return self.query("TRIGger:A:EDGE:SOUrce?")
+        except: return "CH1"
+
+    def get_trigger_level(self) -> float:
+        try: return float(self.query("TRIGger:A:LEVel?"))
+        except: return 0.0
+
+    def get_trigger_mode(self) -> str:
+        try: return self.query("TRIGger:A:MODe?")
+        except: return "AUTO"
+
+    # ── Aquisição ────────────────────────────────────────────────────────────
+
+    def set_acquire_mode(self, mode: str):
+        """Modo: SAMple | PEAKdetect | AVErage | HIRes."""
+        self.write(f"ACQuire:MODe {mode}")
+
+    def set_acquire_numavg(self, n: int):
+        """Número de médias (modo Average): 2, 4, 8, 16, 32, 64, 128, 256, 512."""
+        self.write(f"ACQuire:NUMAVg {n}")
+
+    def get_acquire_mode(self) -> str:
+        try: return self.query("ACQuire:MODe?")
+        except: return "SAM"
+
+    def read_all_settings(self) -> dict:
+        """Lê as configurações atuais do DPO 2012B de uma vez."""
+        return {
+            "tb_scale":   self.get_timebase_scale(),
+            "rec_length": self.get_record_length(),
+            "ch1_scale":  self.get_ch_scale(1),
+            "ch1_coup":   self.get_ch_coupling(1),
+            "ch1_bw":     self.get_ch_bandwidth(1),
+            "ch2_scale":  self.get_ch_scale(2),
+            "ch2_coup":   self.get_ch_coupling(2),
+            "ch2_bw":     self.get_ch_bandwidth(2),
+            "trig_src":   self.get_trigger_source(),
+            "trig_lvl":   self.get_trigger_level(),
+            "trig_mode":  self.get_trigger_mode(),
+            "acq_mode":   self.get_acquire_mode(),
+        }
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Gerenciador de conexão
