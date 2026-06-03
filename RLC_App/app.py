@@ -480,8 +480,149 @@ class BatimentosApp(ctk.CTk):
                      font=("Courier New", 12, "bold"), text_color=TEXT_H,
                      ).pack(padx=16, pady=10)
 
+        # ── Presets do artigo ──────────────────────────────────────────────
+        # Configurações baseadas nas Figuras 3 e 4 do artigo RBEF/SciELO:
+        # "Batimentos e Ressonância"
+        # Fig 3: frequências fundamentais (~440 Hz, T ≈ 2,27 ms)
+        # Fig 4a: batimentos 439 Hz + 410 Hz → f_bat = 15,6 Hz (T_bat ≈ 64 ms)
+        # Fig 4b/c: ressonância — sinal amplificado em fase
+        # Fig 4d: sem ressonância — frequências diferentes, sem amplificação
+        PRESETS = {
+            "Fig 3 — Freq. Fundamental\n~440 Hz  ·  T≈2,27ms": {
+                "tb":    "1ms",       # 1ms/div → ~4 ciclos de 440 Hz visíveis
+                "rec":   "10000",
+                "ch1_v": "500mV",     # sinal do CA3140 na faixa de centenas de mV
+                "ch1_c": "AC",        # AC remove offset DC do amplificador
+                "ch1_b": "FULl (100MHz)",
+                "ch2_v": "500mV",
+                "ch2_c": "AC",
+                "ch2_b": "FULl (100MHz)",
+                "t_src": "CH1",
+                "t_slp": "RISE",
+                "t_lvl": "0.000",
+                "t_mod": "AUTO",
+                "a_mod": "SAMple",
+                "desc":  "Fig 3 — Mede T e f de cada diapasão individualmente.\n"
+                         "Conta ciclos na tela → f = 1/T.\n"
+                         "Timebase 1ms/div mostra ~4–5 ciclos de 440 Hz.",
+            },
+            "Fig 4a — Batimentos\n439+410 Hz · f_bat=15,6 Hz": {
+                "tb":    "20ms",      # T_bat ≈ 64ms → 20ms/div mostra ~3 batimentos
+                "rec":   "10000",
+                "ch1_v": "200mV",     # amplitude modulada — escala menor para ver envoltória
+                "ch1_c": "AC",
+                "ch1_b": "FULl (100MHz)",
+                "ch2_v": "200mV",
+                "ch2_c": "AC",
+                "ch2_b": "FULl (100MHz)",
+                "t_src": "CH1",
+                "t_slp": "RISE",
+                "t_lvl": "0.000",
+                "t_mod": "AUTO",
+                "a_mod": "SAMple",
+                "desc":  "Fig 4a — Mostra a envoltória de amplitude (batimentos).\n"
+                         "f_bat = |f₁−f₂| = |439−410| = 29 Hz → T_bat ≈ 34 ms\n"
+                         "Artigo mediu f_bat ≈ 15,6 Hz com presilha posicionada.\n"
+                         "Timebase 20ms/div para ver 2–3 ciclos do batimento.",
+            },
+            "Fig 4b/c — Ressonância\nFrequências iguais · em fase": {
+                "tb":    "1ms",       # mesma escala da Fig 3 para comparar ciclos
+                "rec":   "10000",
+                "ch1_v": "200mV",
+                "ch1_c": "AC",
+                "ch1_b": "FULl (100MHz)",
+                "ch2_v": "200mV",     # CH2 = detector em ressonância (amplitude maior)
+                "ch2_c": "AC",
+                "ch2_b": "FULl (100MHz)",
+                "t_src": "CH1",
+                "t_slp": "RISE",
+                "t_lvl": "0.000",
+                "t_mod": "NORMal",    # Normal: trigger mais estável para comparar fases
+                "a_mod": "SAMple",
+                "desc":  "Fig 4b/c — Ressonância: detector a 20 cm da fonte.\n"
+                         "CH1=fonte (439 Hz), CH2=detector em ressonância.\n"
+                         "Sinais ficam em fase e CH2 tem amplitude máxima.\n"
+                         "Trigger Normal para visualização estável.",
+            },
+            "Fig 4d — Sem Ressonância\n439 Hz vs detector 410 Hz": {
+                "tb":    "1ms",
+                "rec":   "10000",
+                "ch1_v": "200mV",
+                "ch1_c": "AC",
+                "ch1_b": "FULl (100MHz)",
+                "ch2_v": "200mV",     # CH2 = detector fora de ressonância (amplitude pequena)
+                "ch2_c": "AC",
+                "ch2_b": "FULl (100MHz)",
+                "t_src": "CH1",
+                "t_slp": "RISE",
+                "t_lvl": "0.000",
+                "t_mod": "NORMal",
+                "a_mod": "SAMple",
+                "desc":  "Fig 4d — Sem ressonância: presilha no detector → 410 Hz.\n"
+                         "Fonte em 439 Hz, detector em 410 Hz.\n"
+                         "CH2 mostra amplitude muito menor — sem amplificação.\n"
+                         "Compara com Fig 4b para evidenciar a seletividade.",
+            },
+        }
+        self._presets    = PRESETS
+        self._preset_map = {
+            "Fig 3 — Freq. Fundamental\n~440 Hz  ·  T≈2,27ms":         0,
+            "Fig 4a — Batimentos\n439+410 Hz · f_bat=15,6 Hz":         1,
+            "Fig 4b/c — Ressonância\nFrequências iguais · em fase":    2,
+            "Fig 4d — Sem Ressonância\n439 Hz vs detector 410 Hz":     3,
+        }
+
+        ps = ctk.CTkFrame(scroll, fg_color=PANEL_BG, corner_radius=10,
+                          border_width=1, border_color=BORDER)
+        ps.grid(row=1, column=0, columnspan=3, sticky="ew", padx=8, pady=8)
+
+        ctk.CTkLabel(ps, text="PRESETS DO ARTIGO  —  Batimentos e Ressonância (RBEF/SciELO)",
+                     font=("Arial", 12, "bold"), text_color=ACCENT,
+                     anchor="w").pack(fill="x", padx=14, pady=(12, 4))
+        ctk.CTkLabel(ps, text="Clique num preset para preencher todas as configurações "
+                              "equivalentes aos gráficos do artigo.",
+                     font=("Arial", 10), text_color=TEXT_S,
+                     anchor="w").pack(fill="x", padx=14, pady=(0, 8))
+        ctk.CTkFrame(ps, fg_color=BORDER, height=1,
+                     corner_radius=0).pack(fill="x", padx=14, pady=(0, 10))
+
+        btn_row = ctk.CTkFrame(ps, fg_color="transparent")
+        btn_row.pack(fill="x", padx=10, pady=(0, 8))
+
+        PRESET_COLORS = [
+            (WAVE_C,   "#1a3a20"),
+            ("#c084fc", "#2d1a4a"),
+            (ACCENT,   "#0a2535"),
+            (PEAK2_C,  "#3a2000"),
+        ]
+
+        self._preset_desc_lbl = ctk.CTkLabel(
+            ps, text="← selecione um preset para ver a descrição",
+            font=F_MONO, text_color=TEXT_D, anchor="w", wraplength=900,
+        )
+        self._preset_desc_lbl.pack(fill="x", padx=14, pady=(4, 12))
+
+        for i, (name, cfg) in enumerate(PRESETS.items()):
+            color, hover = PRESET_COLORS[i]
+            btn = ctk.CTkButton(
+                btn_row,
+                text=name,
+                fg_color=hover,
+                hover_color=hover,
+                border_width=1,
+                border_color=color,
+                text_color=color,
+                corner_radius=8,
+                font=("Courier New", 11),
+                height=56,
+                width=220,
+                anchor="w",
+                command=lambda c=cfg, lbl=self._preset_desc_lbl: self._apply_preset(c, lbl),
+            )
+            btn.pack(side="left", padx=6, pady=4)
+
         # ── Seção Horizontal (Timebase) ────────────────────────────────────
-        s_tb = section("⏱  Horizontal  (Timebase)", row=1, col=0)
+        s_tb = section("⏱  Horizontal  (Timebase)", row=2, col=0)
 
         TB_SCALES = ["1ns", "2ns", "5ns", "10ns", "20ns", "50ns",
                      "100ns", "200ns", "500ns",
@@ -503,7 +644,7 @@ class BatimentosApp(ctk.CTk):
 
         self._tb_scale = row_field(s_tb, "Escala  (s/div)",
                                    lambda p: optmenu(p, TB_SCALES, 130))
-        self._tb_scale.set("1ms")
+        self._tb_scale.set("1ms")          # Fig 3 default: 1ms/div → ~4 ciclos de 440Hz
 
         self._rec_len = row_field(s_tb, "Record Length",
                                   lambda p: optmenu(p, ["1000","10000",
@@ -511,17 +652,17 @@ class BatimentosApp(ctk.CTk):
         self._rec_len.set("10000")
 
         # ── Seção Canal 1 ──────────────────────────────────────────────────
-        s_ch1 = section("📡  Canal 1  (CH1)", row=1, col=1)
+        s_ch1 = section("📡  Canal 1  (CH1)", row=2, col=1)
         self._ch1_scale, self._ch1_coup, self._ch1_bw = \
             self._build_channel_section(s_ch1, row_field, entry, optmenu)
 
         # ── Seção Canal 2 ──────────────────────────────────────────────────
-        s_ch2 = section("📡  Canal 2  (CH2)", row=1, col=2)
+        s_ch2 = section("📡  Canal 2  (CH2)", row=2, col=2)
         self._ch2_scale, self._ch2_coup, self._ch2_bw = \
             self._build_channel_section(s_ch2, row_field, entry, optmenu)
 
         # ── Seção Trigger ──────────────────────────────────────────────────
-        s_tr = section("⚡  Trigger", row=2, col=0)
+        s_tr = section("⚡  Trigger", row=3, col=0)
 
         self._trig_src = row_field(s_tr, "Fonte",
                                    lambda p: optmenu(p, ["CH1","CH2","EXT"], 100))
@@ -539,7 +680,7 @@ class BatimentosApp(ctk.CTk):
         self._trig_mode.set("AUTO")
 
         # ── Seção Aquisição ────────────────────────────────────────────────
-        s_aq = section("🔬  Aquisição", row=2, col=1)
+        s_aq = section("🔬  Aquisição", row=3, col=1)
 
         self._acq_mode = row_field(s_aq, "Modo",
                                    lambda p: optmenu(p,
@@ -552,7 +693,7 @@ class BatimentosApp(ctk.CTk):
         self._acq_avg.set("16")
 
         # ── Botões de ação ─────────────────────────────────────────────────
-        s_ac = section("🎛  Ações", row=2, col=2)
+        s_ac = section("🎛  Ações", row=3, col=2)
 
         _btn(s_ac, "✅  Aplicar Configurações",
              ACCENT, "#0090b0", APP_BG,
@@ -606,6 +747,27 @@ class BatimentosApp(ctk.CTk):
         bw.set("FULl (100MHz)")
 
         return scale, coup, bw
+
+    def _apply_preset(self, cfg: dict, desc_lbl):
+        """Preenche todos os campos da aba com as configurações do preset."""
+        self._tb_scale.set(cfg["tb"])
+        self._rec_len.set(cfg["rec"])
+        self._ch1_scale.set(cfg["ch1_v"])
+        self._ch1_coup.set(cfg["ch1_c"])
+        self._ch1_bw.set(cfg["ch1_b"])
+        self._ch2_scale.set(cfg["ch2_v"])
+        self._ch2_coup.set(cfg["ch2_c"])
+        self._ch2_bw.set(cfg["ch2_b"])
+        self._trig_src.set(cfg["t_src"])
+        self._trig_slope.set(cfg["t_slp"])
+        self._trig_level.delete(0, "end")
+        self._trig_level.insert(0, cfg["t_lvl"])
+        self._trig_mode.set(cfg["t_mod"])
+        self._acq_mode.set(cfg["a_mod"])
+        desc_lbl.configure(text=cfg["desc"], text_color=ACCENT)
+        self._cfg_status.configure(
+            text="Preset carregado — clique em  ✅ Aplicar  para enviar ao scope.",
+            text_color=AMBER_C)
 
     def _apply_scope_config(self):
         """Envia todas as configurações para o DPO 2012B."""
