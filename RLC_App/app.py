@@ -293,8 +293,9 @@ class BatimentosApp(ctk.CTk):
 
         self._tabs.add("  Medição  ")
         self._tabs.add("  Configurar Scope  ")
+        self._tabs.add("  Análise Consolidada  ")
 
-        # Aba 1 — Medição
+        # Aba 1 — Medição (cards + gráfico simples)
         tab1 = self._tabs.tab("  Medição  ")
         tab1.grid_rowconfigure(0, weight=1)
         tab1.grid_columnconfigure(0, weight=0)
@@ -307,6 +308,12 @@ class BatimentosApp(ctk.CTk):
         tab2.grid_rowconfigure(0, weight=1)
         tab2.grid_columnconfigure(0, weight=1)
         self._build_scope_config(tab2)
+
+        # Aba 3 — Análise consolidada
+        tab3 = self._tabs.tab("  Análise Consolidada  ")
+        tab3.grid_rowconfigure(0, weight=1)
+        tab3.grid_columnconfigure(0, weight=1)
+        self._build_consolidated_panel(tab3)
 
     # ── Painel de métricas (esquerda) ─────────────────────────────────────────
 
@@ -365,102 +372,159 @@ class BatimentosApp(ctk.CTk):
     # ── Painel de gráficos (direita) ──────────────────────────────────────────
 
     def _build_plot_panel(self, parent):
+        """Aba 1 — gráfico simples: forma de onda + FFT."""
         outer = ctk.CTkFrame(parent, fg_color=SCOPE_BG, corner_radius=0)
         outer.grid(row=0, column=1, sticky="nsew")
         outer.grid_rowconfigure(0, weight=1)
         outer.grid_columnconfigure(0, weight=1)
 
         self._fig = Figure(facecolor=SCOPE_BG)
-        gs = GridSpec(3, 1, figure=self._fig,
-                      height_ratios=[3, 1.4, 1.6],
-                      hspace=0.08,
-                      left=0.08, right=0.98,
-                      top=0.93, bottom=0.07)
+        gs = GridSpec(2, 1, figure=self._fig,
+                      height_ratios=[2, 1],
+                      hspace=0.06,
+                      left=0.07, right=0.98,
+                      top=0.97, bottom=0.07)
 
-        # ── Subplot 1: Forma de onda + envoltória ──────────────────────────
+        # ── Forma de onda ──────────────────────────────────────────────────
         self._ax_w = self._fig.add_subplot(gs[0])
         self._style_ax(self._ax_w)
         self._ax_w.set_ylabel("Tensão  (V)", color=TEXT_S, fontsize=9)
-        self._ax_w.axhline(0, color=SCOPE_GRID, lw=0.8)
-        self._ax_w.set_xticklabels([])
-
-        self._ln_w,   = self._ax_w.plot([], [], color=WAVE_C, lw=1.0,
-                                         antialiased=True, label="Sinal")
-        self._ln_env, = self._ax_w.plot([], [], color=PEAK2_C, lw=1.5,
-                                         ls="--", alpha=0.85, label="Envoltória")
-        self._ln_env_neg, = self._ax_w.plot([], [], color=PEAK2_C, lw=1.5,
-                                             ls="--", alpha=0.85)
-        self._ax_w.fill_between([], [], [], color=PEAK2_C, alpha=0.08)
-        self._fill_env = None   # atualizado em _gui_update
-
-        # Texto de identificação do fenômeno (canto superior direito)
-        self._txt_fenomeno = self._ax_w.text(
-            0.99, 0.97, "", transform=self._ax_w.transAxes,
-            color=AMBER_C, fontsize=10, va="top", ha="right",
-            fontfamily="monospace",
-            bbox=dict(boxstyle="round,pad=0.3", fc=SCOPE_BG,
-                      ec=AMBER_C, alpha=0.85))
-
-        self._ax_w.text(0.01, 0.97, "FORMA DE ONDA  +  ENVOLTÓRIA",
+        self._ax_w.text(0.01, 0.96, "FORMA DE ONDA",
                         transform=self._ax_w.transAxes,
                         color=WAVE_C, fontsize=9, va="top",
                         fontfamily="monospace")
-        self._ax_w.legend(facecolor=SCOPE_BG, edgecolor=SCOPE_GRID,
-                          labelcolor=TEXT_S, fontsize=8,
-                          loc="lower right")
+        self._ax_w.axhline(0, color=SCOPE_GRID, lw=0.8)
+        self._ax_w.set_xticklabels([])
 
-        # ── Subplot 2: Envoltória isolada (amplitude vs tempo) ─────────────
-        self._ax_e = self._fig.add_subplot(gs[1])
-        self._style_ax(self._ax_e)
-        self._ax_e.set_ylabel("Amp. (V)", color=TEXT_S, fontsize=8)
-        self._ax_e.set_xticklabels([])
-        self._ax_e.text(0.01, 0.94, "ENVOLTÓRIA  (módulo)",
-                        transform=self._ax_e.transAxes,
-                        color=PEAK2_C, fontsize=8, va="top",
-                        fontfamily="monospace")
+        self._ln_w, = self._ax_w.plot([], [], color=WAVE_C,
+                                       lw=1.2, antialiased=True)
 
-        self._ln_amp, = self._ax_e.plot([], [], color=PEAK2_C,
-                                         lw=1.4, antialiased=True)
-        # Linha horizontal marcando o pico de amplitude (ressonância)
-        self._hl_pico = self._ax_e.axhline(np.nan, color=PEAK1_C,
-                                            lw=1, ls=":", alpha=0.8)
-        self._txt_pico = self._ax_e.text(
-            0.99, 0.88, "", transform=self._ax_e.transAxes,
-            color=PEAK1_C, fontsize=7, va="top", ha="right",
-            fontfamily="monospace")
-
-        # ── Subplot 3: FFT consolidada ─────────────────────────────────────
-        self._ax_f = self._fig.add_subplot(gs[2])
+        # ── FFT ────────────────────────────────────────────────────────────
+        self._ax_f = self._fig.add_subplot(gs[1])
         self._style_ax(self._ax_f)
         self._ax_f.set_xlabel("Frequência  (Hz)", color=TEXT_S, fontsize=9)
-        self._ax_f.set_ylabel("Amp. norm.", color=TEXT_S, fontsize=8)
-        self._ax_f.text(0.01, 0.94, "ESPECTRO  FFT",
+        self._ax_f.set_ylabel("Amplitude", color=TEXT_S, fontsize=9)
+        self._ax_f.text(0.01, 0.96, "ESPECTRO  FFT",
                         transform=self._ax_f.transAxes,
                         color=FFT_C, fontsize=9, va="top",
                         fontfamily="monospace")
 
         self._ln_f,  = self._ax_f.plot([], [], color=FFT_C,
-                                         lw=1.0, antialiased=True)
+                                        lw=1.0, antialiased=True)
         self._vl_f1  = self._ax_f.axvline(np.nan, color=PEAK1_C,
                                            lw=1.5, ls="--", alpha=0.9)
         self._vl_f2  = self._ax_f.axvline(np.nan, color=PEAK2_C,
                                            lw=1.5, ls="--", alpha=0.9)
         self._ann_f1 = self._ax_f.annotate(
-            "", xy=(0, 0.9), xycoords=("data", "axes fraction"),
+            "", xy=(0, 0.8), xycoords=("data", "axes fraction"),
             color=PEAK1_C, fontsize=8, fontfamily="monospace", ha="center")
         self._ann_f2 = self._ax_f.annotate(
-            "", xy=(0, 0.7), xycoords=("data", "axes fraction"),
+            "", xy=(0, 0.6), xycoords=("data", "axes fraction"),
             color=PEAK2_C, fontsize=8, fontfamily="monospace", ha="center")
-
-        # Anotação f_bat na FFT (seta entre f1 e f2)
-        self._ann_bat = self._ax_f.text(
-            0.99, 0.94, "", transform=self._ax_f.transAxes,
-            color=AMBER_C, fontsize=8, va="top", ha="right",
-            fontfamily="monospace")
 
         self._canvas = FigureCanvasTkAgg(self._fig, master=outer)
         self._canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
         self._canvas.draw()
+
+    def _build_consolidated_panel(self, parent):
+        """Aba 3 — gráfico consolidado: onda + envoltória + FFT identificado."""
+        outer = ctk.CTkFrame(parent, fg_color=SCOPE_BG, corner_radius=0)
+        outer.grid(row=0, column=0, sticky="nsew")
+        outer.grid_rowconfigure(0, weight=1)
+        outer.grid_columnconfigure(0, weight=1)
+
+        self._fig_c = Figure(facecolor=SCOPE_BG)
+        gs = GridSpec(3, 1, figure=self._fig_c,
+                      height_ratios=[3, 1.4, 1.6],
+                      hspace=0.08,
+                      left=0.08, right=0.98,
+                      top=0.93, bottom=0.07)
+
+        # ── C1: Forma de onda + envoltória ────────────────────────────────
+        self._ax_cw = self._fig_c.add_subplot(gs[0])
+        self._style_ax(self._ax_cw)
+        self._ax_cw.set_ylabel("Tensão  (V)", color=TEXT_S, fontsize=9)
+        self._ax_cw.axhline(0, color=SCOPE_GRID, lw=0.8)
+        self._ax_cw.set_xticklabels([])
+
+        self._ln_cw,      = self._ax_cw.plot([], [], color=WAVE_C, lw=1.0,
+                                               antialiased=True, label="Sinal")
+        self._ln_cenv,    = self._ax_cw.plot([], [], color=PEAK2_C, lw=1.8,
+                                               ls="--", alpha=0.9, label="Envoltória")
+        self._ln_cenv_neg,= self._ax_cw.plot([], [], color=PEAK2_C, lw=1.8,
+                                               ls="--", alpha=0.9)
+        self._fill_cenv   = None
+
+        # Badge de fenômeno identificado
+        self._txt_cfenomeno = self._ax_cw.text(
+            0.99, 0.97, "Aguardando dados…",
+            transform=self._ax_cw.transAxes,
+            color=AMBER_C, fontsize=11, va="top", ha="right",
+            fontfamily="monospace",
+            bbox=dict(boxstyle="round,pad=0.4", fc=SCOPE_BG,
+                      ec=AMBER_C, lw=1.5, alpha=0.92))
+
+        self._ax_cw.text(0.01, 0.97, "FORMA DE ONDA  +  ENVOLTÓRIA",
+                         transform=self._ax_cw.transAxes,
+                         color=WAVE_C, fontsize=9, va="top",
+                         fontfamily="monospace")
+        self._ax_cw.legend(facecolor=SCOPE_BG, edgecolor=SCOPE_GRID,
+                           labelcolor=TEXT_S, fontsize=8, loc="lower right")
+
+        # ── C2: Envoltória isolada — mostra modulação do batimento ────────
+        self._ax_ce = self._fig_c.add_subplot(gs[1])
+        self._style_ax(self._ax_ce)
+        self._ax_ce.set_ylabel("Amp. (V)", color=TEXT_S, fontsize=8)
+        self._ax_ce.set_xticklabels([])
+        self._ax_ce.text(0.01, 0.90, "ENVOLTÓRIA  —  modulação de amplitude",
+                         transform=self._ax_ce.transAxes,
+                         color=PEAK2_C, fontsize=8, va="top",
+                         fontfamily="monospace")
+
+        self._ln_camp,  = self._ax_ce.plot([], [], color=PEAK2_C,
+                                            lw=1.4, antialiased=True)
+        self._hl_cpico  = self._ax_ce.axhline(np.nan, color=PEAK1_C,
+                                               lw=1, ls=":", alpha=0.8)
+        self._txt_cpico = self._ax_ce.text(
+            0.99, 0.88, "", transform=self._ax_ce.transAxes,
+            color=PEAK1_C, fontsize=8, va="top", ha="right",
+            fontfamily="monospace")
+
+        # ── C3: FFT com identificação completa ────────────────────────────
+        self._ax_cf = self._fig_c.add_subplot(gs[2])
+        self._style_ax(self._ax_cf)
+        self._ax_cf.set_xlabel("Frequência  (Hz)", color=TEXT_S, fontsize=9)
+        self._ax_cf.set_ylabel("Amp. norm.", color=TEXT_S, fontsize=8)
+        self._ax_cf.text(0.01, 0.90, "ESPECTRO  FFT  —  identificação de picos",
+                         transform=self._ax_cf.transAxes,
+                         color=FFT_C, fontsize=9, va="top",
+                         fontfamily="monospace")
+
+        self._ln_cf,   = self._ax_cf.plot([], [], color=FFT_C,
+                                           lw=1.1, antialiased=True)
+        self._vl_cf1   = self._ax_cf.axvline(np.nan, color=PEAK1_C,
+                                              lw=1.8, ls="--", alpha=0.9)
+        self._vl_cf2   = self._ax_cf.axvline(np.nan, color=PEAK2_C,
+                                              lw=1.8, ls="--", alpha=0.9)
+        self._ann_cf1  = self._ax_cf.annotate(
+            "", xy=(0, 0.90), xycoords=("data", "axes fraction"),
+            color=PEAK1_C, fontsize=9, fontfamily="monospace", ha="center",
+            fontweight="bold")
+        self._ann_cf2  = self._ax_cf.annotate(
+            "", xy=(0, 0.72), xycoords=("data", "axes fraction"),
+            color=PEAK2_C, fontsize=9, fontfamily="monospace", ha="center",
+            fontweight="bold")
+        # Caixa de resumo no canto da FFT
+        self._txt_cbat = self._ax_cf.text(
+            0.99, 0.90, "", transform=self._ax_cf.transAxes,
+            color=AMBER_C, fontsize=9, va="top", ha="right",
+            fontfamily="monospace",
+            bbox=dict(boxstyle="round,pad=0.35", fc=SCOPE_BG,
+                      ec=AMBER_C, lw=1.2, alpha=0.88))
+
+        self._canvas_c = FigureCanvasTkAgg(self._fig_c, master=outer)
+        self._canvas_c.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        self._canvas_c.draw()
 
     def _style_ax(self, ax):
         ax.set_facecolor(SCOPE_BG)
@@ -1083,68 +1147,98 @@ class BatimentosApp(ctk.CTk):
         self._c_bat.set(calc.fmt_hz(m["f_bat"])); self._c_bat.pulse()
         self._c_med.set(calc.fmt_hz(m["f_med"])); self._c_med.pulse()
 
-        t_ms = t * 1e3
-        env  = self._compute_envelope(v)
+        t_ms   = t * 1e3
+        freqs  = m["freqs"]
+        amps   = m["amps"]
 
-        # ── Subplot 1: Forma de onda + envoltória ──────────────────────────
+        # ── Aba 1: gráfico simples ─────────────────────────────────────────
         self._ln_w.set_data(t_ms, v)
-        self._ln_env.set_data(t_ms, env)
-        self._ln_env_neg.set_data(t_ms, -env)
-
-        # Área sombreada entre +env e -env (remove anterior e redesenha)
-        if self._fill_env is not None:
-            self._fill_env.remove()
-        self._fill_env = self._ax_w.fill_between(
-            t_ms, -env, env,
-            color=PEAK2_C, alpha=0.07)
-
         self._ax_w.relim()
         self._ax_w.autoscale_view()
+        self._ax_w.set_xlabel("Tempo  (ms)", color=TEXT_S, fontsize=9)
 
-        fenomeno = self._detect_phenomenon(m)
-        self._txt_fenomeno.set_text(fenomeno)
-        # Cor do label muda conforme o fenômeno
-        cor = ("#c084fc" if "BATIMENTO" in fenomeno
-               else ACCENT if "RESSONÂNCIA" in fenomeno
-               else AMBER_C)
-        self._txt_fenomeno.set_color(cor)
-        self._txt_fenomeno.get_bbox_patch().set_edgecolor(cor)
-
-        # ── Subplot 2: Envoltória isolada ──────────────────────────────────
-        self._ln_amp.set_data(t_ms, env)
-        pico_v = float(env.max()) if len(env) else 0.0
-        self._hl_pico.set_ydata([pico_v, pico_v])
-        self._txt_pico.set_text(f"pico={pico_v:.3f} V")
-        self._ax_e.relim()
-        self._ax_e.autoscale_view()
-        self._ax_e.set_ylim(bottom=0)
-
-        # ── Subplot 3: FFT ─────────────────────────────────────────────────
-        freqs, amps = m["freqs"], m["amps"]
-        f_max_plot  = max(m["f1"] * 2.5, m["f2"] * 1.5, 2000) if m["f2"] > 0 else 2000
-        mask = freqs <= f_max_plot
+        mask = freqs <= 2000
         self._ln_f.set_data(freqs[mask], amps[mask])
-        self._ax_f.set_xlim(0, f_max_plot)
-        self._ax_f.set_ylim(0, 1.15)
+        self._ax_f.set_xlim(0, 2000)
+        self._ax_f.set_ylim(0, 1.1)
 
         if m["f1"] > 0:
             self._vl_f1.set_xdata([m["f1"], m["f1"]])
             self._ann_f1.set_text(f"f₁={calc.fmt_hz(m['f1'])}")
-            self._ann_f1.xy = (m["f1"], 0.9)
+            self._ann_f1.xy = (m["f1"], 0.8)
         if m["f2"] > 0:
             self._vl_f2.set_xdata([m["f2"], m["f2"]])
             self._ann_f2.set_text(f"f₂={calc.fmt_hz(m['f2'])}")
-            self._ann_f2.xy = (m["f2"], 0.7)
-
-        # Anotação do batimento
-        if m["f_bat"] > 0 and m["f1"] > 0 and m["f2"] > 0:
-            self._ann_bat.set_text(
-                f"f_bat = |f₁−f₂| = {calc.fmt_hz(m['f_bat'])}\n"
-                f"f_med = (f₁+f₂)/2 = {calc.fmt_hz(m['f_med'])}")
-        else:
-            self._ann_bat.set_text("")
+            self._ann_f2.xy = (m["f2"], 0.6)
 
         self._canvas.draw_idle()
+
+        # ── Aba 3: gráfico consolidado ─────────────────────────────────────
+        self._update_consolidated(t_ms, v, m, freqs, amps)
+
+    def _update_consolidated(self, t_ms, v, m, freqs, amps):
+        """Atualiza os 3 subplots da aba Análise Consolidada."""
+        env    = self._compute_envelope(v)
+        f_max  = max(m["f1"] * 2.5, m["f2"] * 1.5, 2000) if m["f2"] > 0 else 2000
+        pico_v = float(env.max()) if len(env) else 0.0
+
+        # C1 — Forma de onda + envoltória
+        self._ln_cw.set_data(t_ms, v)
+        self._ln_cenv.set_data(t_ms, env)
+        self._ln_cenv_neg.set_data(t_ms, -env)
+
+        if self._fill_cenv is not None:
+            self._fill_cenv.remove()
+        self._fill_cenv = self._ax_cw.fill_between(
+            t_ms, -env, env, color=PEAK2_C, alpha=0.08)
+
+        self._ax_cw.relim()
+        self._ax_cw.autoscale_view()
+        self._ax_cw.set_xlabel("Tempo  (ms)", color=TEXT_S, fontsize=9)
+
+        fenomeno = self._detect_phenomenon(m)
+        cor = ("#c084fc" if "BATIMENTO"   in fenomeno
+               else ACCENT if "RESSONÂNCIA" in fenomeno
+               else AMBER_C)
+        self._txt_cfenomeno.set_text(fenomeno)
+        self._txt_cfenomeno.set_color(cor)
+        self._txt_cfenomeno.get_bbox_patch().set_edgecolor(cor)
+
+        # C2 — Envoltória isolada
+        self._ln_camp.set_data(t_ms, env)
+        self._hl_cpico.set_ydata([pico_v, pico_v])
+        self._txt_cpico.set_text(f"pico = {pico_v:.3f} V")
+        self._ax_ce.relim()
+        self._ax_ce.autoscale_view()
+        self._ax_ce.set_ylim(bottom=0)
+        self._ax_ce.set_xlabel("Tempo  (ms)", color=TEXT_S, fontsize=9)
+
+        # C3 — FFT identificada
+        mask = freqs <= f_max
+        self._ln_cf.set_data(freqs[mask], amps[mask])
+        self._ax_cf.set_xlim(0, f_max)
+        self._ax_cf.set_ylim(0, 1.18)
+
+        if m["f1"] > 0:
+            self._vl_cf1.set_xdata([m["f1"], m["f1"]])
+            self._ann_cf1.set_text(f"f₁ = {calc.fmt_hz(m['f1'])}")
+            self._ann_cf1.xy = (m["f1"], 0.90)
+        if m["f2"] > 0:
+            self._vl_cf2.set_xdata([m["f2"], m["f2"]])
+            self._ann_cf2.set_text(f"f₂ = {calc.fmt_hz(m['f2'])}")
+            self._ann_cf2.xy = (m["f2"], 0.72)
+
+        if m["f_bat"] > 0 and m["f1"] > 0 and m["f2"] > 0:
+            self._txt_cbat.set_text(
+                f"f_bat = |f₁ − f₂|\n"
+                f"      = {calc.fmt_hz(m['f_bat'])}\n"
+                f"f_med = {calc.fmt_hz(m['f_med'])}")
+        elif m["f1"] > 0:
+            self._txt_cbat.set_text(f"f = {calc.fmt_hz(m['f1'])}")
+        else:
+            self._txt_cbat.set_text("")
+
+        self._canvas_c.draw_idle()
 
     # ─── Salvar CSV ───────────────────────────────────────────────────────────
 
