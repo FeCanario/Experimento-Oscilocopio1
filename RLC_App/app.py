@@ -1065,6 +1065,19 @@ class BatimentosApp(ctk.CTk):
     # ─── Helpers de análise ───────────────────────────────────────────────────
 
     @staticmethod
+    def _decimate(t: np.ndarray, v: np.ndarray, max_pts: int = 1500):
+        """
+        Reduz os arrays para no máximo max_pts antes de plotar.
+        Evita o efeito 'código de barras' e acelera o rendering do matplotlib.
+        A FFT é calculada ANTES da decimação (sobre os dados completos).
+        """
+        n = len(t)
+        if n <= max_pts:
+            return t, v
+        step = max(1, n // max_pts)
+        return t[::step], v[::step]
+
+    @staticmethod
     def _compute_envelope(voltage: np.ndarray, window: int = None) -> np.ndarray:
         """
         Envoltória por janela deslizante de máximo absoluto.
@@ -1113,7 +1126,7 @@ class BatimentosApp(ctk.CTk):
         self._last_voltage = v
         self._last_metrics = m
 
-        # ── Cards ──────────────────────────────────────────────────────────
+        # ── Cards (sempre atualizados) ─────────────────────────────────────
         self._c_T  .set(calc.fmt_time(m["T"]));   self._c_T.pulse()
         self._c_f  .set(calc.fmt_hz(m["f"]));     self._c_f.pulse()
         self._c_f1 .set(calc.fmt_hz(m["f1"]));    self._c_f1.pulse()
@@ -1121,41 +1134,49 @@ class BatimentosApp(ctk.CTk):
         self._c_bat.set(calc.fmt_hz(m["f_bat"])); self._c_bat.pulse()
         self._c_med.set(calc.fmt_hz(m["f_med"])); self._c_med.pulse()
 
-        t_ms   = t * 1e3
-        freqs  = m["freqs"]
-        amps   = m["amps"]
+        t_ms  = t * 1e3
+        freqs = m["freqs"]
+        amps  = m["amps"]
 
-        # ── Aba 1: gráfico simples ─────────────────────────────────────────
-        self._ln_w.set_data(t_ms, v)
-        self._ax_w.relim()
-        self._ax_w.autoscale_view()
-        self._ax_w.set_xlabel("Tempo  (ms)", color=TEXT_S, fontsize=9)
+        # Decimação — máx 1500 pts na tela (evita código de barras)
+        t_plot, v_plot = self._decimate(t_ms, v, max_pts=1500)
 
-        mask = freqs <= 2000
-        self._ln_f.set_data(freqs[mask], amps[mask])
-        self._ax_f.set_xlim(0, 2000)
-        self._ax_f.set_ylim(0, 1.1)
+        # ── Só renderiza o canvas da aba visível ───────────────────────────
+        aba = self._tabs.get()
 
-        if m["f1"] > 0:
-            self._vl_f1.set_xdata([m["f1"], m["f1"]])
-            self._ann_f1.set_text(f"f₁={calc.fmt_hz(m['f1'])}")
-            self._ann_f1.xy = (m["f1"], 0.8)
-        if m["f2"] > 0:
-            self._vl_f2.set_xdata([m["f2"], m["f2"]])
-            self._ann_f2.set_text(f"f₂={calc.fmt_hz(m['f2'])}")
-            self._ann_f2.xy = (m["f2"], 0.6)
+        if "Medição" in aba:
+            self._ln_w.set_data(t_plot, v_plot)
+            self._ax_w.relim()
+            self._ax_w.autoscale_view()
+            self._ax_w.set_xlabel("Tempo  (ms)", color=TEXT_S, fontsize=9)
 
-        self._canvas.draw_idle()
+            mask = freqs <= 2000
+            self._ln_f.set_data(freqs[mask], amps[mask])
+            self._ax_f.set_xlim(0, 2000)
+            self._ax_f.set_ylim(0, 1.1)
 
-        # ── Aba 3: gráfico consolidado ─────────────────────────────────────
-        self._update_consolidated(t_ms, v, m, freqs, amps)
+            if m["f1"] > 0:
+                self._vl_f1.set_xdata([m["f1"], m["f1"]])
+                self._ann_f1.set_text(f"f₁={calc.fmt_hz(m['f1'])}")
+                self._ann_f1.xy = (m["f1"], 0.8)
+            if m["f2"] > 0:
+                self._vl_f2.set_xdata([m["f2"], m["f2"]])
+                self._ann_f2.set_text(f"f₂={calc.fmt_hz(m['f2'])}")
+                self._ann_f2.xy = (m["f2"], 0.6)
 
-    def _update_consolidated(self, t_ms, v, m, freqs, amps):
-        """Atualiza os 2 subplots da aba Análise Consolidada."""
+            self._canvas.draw_idle()
+
+        elif "Análise" in aba:
+            self._update_consolidated(t_ms, t_plot, v_plot, m, freqs, amps)
+
+    def _update_consolidated(self, t_ms_full, t_plot, v_plot, m, freqs, amps):
+        """Atualiza os 2 subplots da aba Análise Consolidada.
+        t_plot/v_plot já estão decimados para plotagem rápida.
+        """
         f_max = max(m["f1"] * 2.5, m["f2"] * 1.5, 2000) if m["f2"] > 0 else 2000
 
         # C1 — Forma de onda com zoom automático no eixo X
-        self._ln_cw.set_data(t_ms, v)
+        self._ln_cw.set_data(t_plot, v_plot)
         self._ax_cw.relim()
         self._ax_cw.autoscale_view()
         self._ax_cw.set_xlabel("Tempo  (ms)", color=TEXT_S, fontsize=9)
@@ -1163,11 +1184,11 @@ class BatimentosApp(ctk.CTk):
         # Zoom: mostra ~10 ciclos da frequência fundamental (mínimo 5 ms)
         f_fund = m["f"] if m["f"] > 50 else (m["f1"] if m["f1"] > 50 else 0)
         if f_fund > 0:
-            x_window = min(10_000.0 / f_fund, float(t_ms[-1] - t_ms[0]))
+            x_window = min(10_000.0 / f_fund, float(t_plot[-1] - t_plot[0]))
         else:
-            x_window = min(30.0, float(t_ms[-1] - t_ms[0]))
+            x_window = min(30.0, float(t_plot[-1] - t_plot[0]))
         x_window = max(x_window, 5.0)
-        self._ax_cw.set_xlim(t_ms[0], t_ms[0] + x_window)
+        self._ax_cw.set_xlim(t_plot[0], t_plot[0] + x_window)
 
         fenomeno = self._detect_phenomenon(m)
         cor = ("#c084fc" if "BATIMENTO"   in fenomeno

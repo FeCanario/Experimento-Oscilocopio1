@@ -92,7 +92,7 @@ class TektronixDPO(InstrumentDriver):
         DATA:SOURCE CHx   → canal de origem
         DATA:ENC ASCII    → codificação texto (vírgulas)
         DATA:START 1      → primeiro ponto
-        DATA:STOP 10000   → último ponto (até 10 000 pts)
+        DATA:STOP 5000    → último ponto (5 000 pts — balanço entre resolução FFT e velocidade)
         WFMPRE:XINCR?     → intervalo de tempo entre pontos (s)
         WFMPRE:XZERO?     → tempo do ponto inicial (s)
         WFMPRE:YMULT?     → fator de conversão ADC → Volt
@@ -104,7 +104,7 @@ class TektronixDPO(InstrumentDriver):
         self.write(f"DATA:SOURCE CH{ch}")
         self.write("DATA:ENC ASCII")
         self.write("DATA:START 1")
-        self.write("DATA:STOP 10000")
+        self.write("DATA:STOP 5000")
 
         # Parâmetros de escala
         xincr = float(self.query("WFMPRE:XINCR?"))
