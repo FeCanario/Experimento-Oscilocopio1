@@ -1154,11 +1154,20 @@ class BatimentosApp(ctk.CTk):
         """Atualiza os 2 subplots da aba Análise Consolidada."""
         f_max = max(m["f1"] * 2.5, m["f2"] * 1.5, 2000) if m["f2"] > 0 else 2000
 
-        # C1 — Forma de onda
+        # C1 — Forma de onda com zoom automático no eixo X
         self._ln_cw.set_data(t_ms, v)
         self._ax_cw.relim()
         self._ax_cw.autoscale_view()
         self._ax_cw.set_xlabel("Tempo  (ms)", color=TEXT_S, fontsize=9)
+
+        # Zoom: mostra ~10 ciclos da frequência fundamental (mínimo 5 ms)
+        f_fund = m["f"] if m["f"] > 50 else (m["f1"] if m["f1"] > 50 else 0)
+        if f_fund > 0:
+            x_window = min(10_000.0 / f_fund, float(t_ms[-1] - t_ms[0]))
+        else:
+            x_window = min(30.0, float(t_ms[-1] - t_ms[0]))
+        x_window = max(x_window, 5.0)
+        self._ax_cw.set_xlim(t_ms[0], t_ms[0] + x_window)
 
         fenomeno = self._detect_phenomenon(m)
         cor = ("#c084fc" if "BATIMENTO"   in fenomeno
