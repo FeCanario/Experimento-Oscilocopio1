@@ -28,6 +28,7 @@ import csv
 import threading
 from datetime import datetime
 from pathlib import Path
+from tkinter import filedialog
 from typing import Optional
 
 import customtkinter as ctk
@@ -370,32 +371,70 @@ class BatimentosApp(ctk.CTk):
         outer.grid_columnconfigure(0, weight=1)
 
         self._fig = Figure(facecolor=SCOPE_BG)
-        gs = GridSpec(2, 1, figure=self._fig,
-                      height_ratios=[2, 1],
-                      hspace=0.06,
-                      left=0.07, right=0.98,
-                      top=0.97, bottom=0.07)
+        gs = GridSpec(3, 1, figure=self._fig,
+                      height_ratios=[3, 1.4, 1.6],
+                      hspace=0.08,
+                      left=0.08, right=0.98,
+                      top=0.93, bottom=0.07)
 
-        # ── Forma de onda ──────────────────────────────────────────────────
+        # ── Subplot 1: Forma de onda + envoltória ──────────────────────────
         self._ax_w = self._fig.add_subplot(gs[0])
         self._style_ax(self._ax_w)
         self._ax_w.set_ylabel("Tensão  (V)", color=TEXT_S, fontsize=9)
-        self._ax_w.text(0.01, 0.96, "FORMA DE ONDA",
-                        transform=self._ax_w.transAxes,
-                        color=WAVE_C, fontsize=9, va="top",
-                        fontfamily="monospace")
         self._ax_w.axhline(0, color=SCOPE_GRID, lw=0.8)
         self._ax_w.set_xticklabels([])
 
-        self._ln_w, = self._ax_w.plot([], [], color=WAVE_C,
-                                       lw=1.2, antialiased=True)
+        self._ln_w,   = self._ax_w.plot([], [], color=WAVE_C, lw=1.0,
+                                         antialiased=True, label="Sinal")
+        self._ln_env, = self._ax_w.plot([], [], color=PEAK2_C, lw=1.5,
+                                         ls="--", alpha=0.85, label="Envoltória")
+        self._ln_env_neg, = self._ax_w.plot([], [], color=PEAK2_C, lw=1.5,
+                                             ls="--", alpha=0.85)
+        self._ax_w.fill_between([], [], [], color=PEAK2_C, alpha=0.08)
+        self._fill_env = None   # atualizado em _gui_update
 
-        # ── FFT ────────────────────────────────────────────────────────────
-        self._ax_f = self._fig.add_subplot(gs[1])
+        # Texto de identificação do fenômeno (canto superior direito)
+        self._txt_fenomeno = self._ax_w.text(
+            0.99, 0.97, "", transform=self._ax_w.transAxes,
+            color=AMBER_C, fontsize=10, va="top", ha="right",
+            fontfamily="monospace",
+            bbox=dict(boxstyle="round,pad=0.3", fc=SCOPE_BG,
+                      ec=AMBER_C, alpha=0.85))
+
+        self._ax_w.text(0.01, 0.97, "FORMA DE ONDA  +  ENVOLTÓRIA",
+                        transform=self._ax_w.transAxes,
+                        color=WAVE_C, fontsize=9, va="top",
+                        fontfamily="monospace")
+        self._ax_w.legend(facecolor=SCOPE_BG, edgecolor=SCOPE_GRID,
+                          labelcolor=TEXT_S, fontsize=8,
+                          loc="lower right")
+
+        # ── Subplot 2: Envoltória isolada (amplitude vs tempo) ─────────────
+        self._ax_e = self._fig.add_subplot(gs[1])
+        self._style_ax(self._ax_e)
+        self._ax_e.set_ylabel("Amp. (V)", color=TEXT_S, fontsize=8)
+        self._ax_e.set_xticklabels([])
+        self._ax_e.text(0.01, 0.94, "ENVOLTÓRIA  (módulo)",
+                        transform=self._ax_e.transAxes,
+                        color=PEAK2_C, fontsize=8, va="top",
+                        fontfamily="monospace")
+
+        self._ln_amp, = self._ax_e.plot([], [], color=PEAK2_C,
+                                         lw=1.4, antialiased=True)
+        # Linha horizontal marcando o pico de amplitude (ressonância)
+        self._hl_pico = self._ax_e.axhline(np.nan, color=PEAK1_C,
+                                            lw=1, ls=":", alpha=0.8)
+        self._txt_pico = self._ax_e.text(
+            0.99, 0.88, "", transform=self._ax_e.transAxes,
+            color=PEAK1_C, fontsize=7, va="top", ha="right",
+            fontfamily="monospace")
+
+        # ── Subplot 3: FFT consolidada ─────────────────────────────────────
+        self._ax_f = self._fig.add_subplot(gs[2])
         self._style_ax(self._ax_f)
         self._ax_f.set_xlabel("Frequência  (Hz)", color=TEXT_S, fontsize=9)
-        self._ax_f.set_ylabel("Amplitude", color=TEXT_S, fontsize=9)
-        self._ax_f.text(0.01, 0.96, "ESPECTRO  FFT",
+        self._ax_f.set_ylabel("Amp. norm.", color=TEXT_S, fontsize=8)
+        self._ax_f.text(0.01, 0.94, "ESPECTRO  FFT",
                         transform=self._ax_f.transAxes,
                         color=FFT_C, fontsize=9, va="top",
                         fontfamily="monospace")
@@ -407,13 +446,17 @@ class BatimentosApp(ctk.CTk):
         self._vl_f2  = self._ax_f.axvline(np.nan, color=PEAK2_C,
                                            lw=1.5, ls="--", alpha=0.9)
         self._ann_f1 = self._ax_f.annotate(
-            "", xy=(0, 0.8), xycoords=("data", "axes fraction"),
-            color=PEAK1_C, fontsize=8, fontfamily="monospace",
-            ha="center")
+            "", xy=(0, 0.9), xycoords=("data", "axes fraction"),
+            color=PEAK1_C, fontsize=8, fontfamily="monospace", ha="center")
         self._ann_f2 = self._ax_f.annotate(
-            "", xy=(0, 0.6), xycoords=("data", "axes fraction"),
-            color=PEAK2_C, fontsize=8, fontfamily="monospace",
-            ha="center")
+            "", xy=(0, 0.7), xycoords=("data", "axes fraction"),
+            color=PEAK2_C, fontsize=8, fontfamily="monospace", ha="center")
+
+        # Anotação f_bat na FFT (seta entre f1 e f2)
+        self._ann_bat = self._ax_f.text(
+            0.99, 0.94, "", transform=self._ax_f.transAxes,
+            color=AMBER_C, fontsize=8, va="top", ha="right",
+            fontfamily="monospace")
 
         self._canvas = FigureCanvasTkAgg(self._fig, master=outer)
         self._canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
@@ -981,12 +1024,58 @@ class BatimentosApp(ctk.CTk):
 
     # ─── Atualização da GUI ───────────────────────────────────────────────────
 
+    # ─── Helpers de análise ───────────────────────────────────────────────────
+
+    @staticmethod
+    def _compute_envelope(voltage: np.ndarray, window: int = None) -> np.ndarray:
+        """
+        Envoltória por janela deslizante de máximo absoluto.
+        Aproxima o resultado do detector de envoltória analógico.
+        """
+        n = len(voltage)
+        if n == 0:
+            return voltage
+        w = window or max(n // 60, 5)
+        env = np.abs(voltage)
+        result = np.zeros(n)
+        for i in range(n):
+            lo = max(0, i - w)
+            hi = min(n, i + w + 1)
+            result[i] = env[lo:hi].max()
+        return result
+
+    @staticmethod
+    def _detect_phenomenon(m: dict) -> str:
+        """
+        Identifica automaticamente o fenômeno com base nas métricas.
+        Retorna string descritiva para exibir no gráfico e no CSV.
+        """
+        f1, f2   = m.get("f1", 0), m.get("f2", 0)
+        f_bat    = m.get("f_bat", 0)
+        f        = m.get("f", 0)
+
+        # Dois picos bem definidos e batimento audível (< 50 Hz)
+        if f1 > 50 and f2 > 50 and 1 < f_bat < 50:
+            return f"BATIMENTO  f_bat={calc.fmt_hz(f_bat)}"
+
+        # Dois picos muito próximos → ressonância em iminência ou início de batimento
+        if f1 > 50 and f2 > 50 and f_bat <= 1:
+            return f"RESSONÂNCIA  f≈{calc.fmt_hz(f1)}"
+
+        # Pico único dominante → frequência fundamental ou ressonância plena
+        if f > 50:
+            return f"FUND. / RESSONÂNCIA  f={calc.fmt_hz(f)}"
+
+        return "Aguardando sinal…"
+
+    # ─── Atualização da GUI ───────────────────────────────────────────────────
+
     def _gui_update(self, t: np.ndarray, v: np.ndarray, m: dict):
         self._last_time    = t
         self._last_voltage = v
         self._last_metrics = m
 
-        # Cards
+        # ── Cards ──────────────────────────────────────────────────────────
         self._c_T  .set(calc.fmt_time(m["T"]));   self._c_T.pulse()
         self._c_f  .set(calc.fmt_hz(m["f"]));     self._c_f.pulse()
         self._c_f1 .set(calc.fmt_hz(m["f1"]));    self._c_f1.pulse()
@@ -994,27 +1083,66 @@ class BatimentosApp(ctk.CTk):
         self._c_bat.set(calc.fmt_hz(m["f_bat"])); self._c_bat.pulse()
         self._c_med.set(calc.fmt_hz(m["f_med"])); self._c_med.pulse()
 
-        # Forma de onda
-        self._ln_w.set_data(t * 1e3, v)
-        self._ax_w.relim(); self._ax_w.autoscale_view()
-        self._ax_w.set_xlabel("Tempo  (ms)", color=TEXT_S, fontsize=9)
+        t_ms = t * 1e3
+        env  = self._compute_envelope(v)
 
-        # FFT
+        # ── Subplot 1: Forma de onda + envoltória ──────────────────────────
+        self._ln_w.set_data(t_ms, v)
+        self._ln_env.set_data(t_ms, env)
+        self._ln_env_neg.set_data(t_ms, -env)
+
+        # Área sombreada entre +env e -env (remove anterior e redesenha)
+        if self._fill_env is not None:
+            self._fill_env.remove()
+        self._fill_env = self._ax_w.fill_between(
+            t_ms, -env, env,
+            color=PEAK2_C, alpha=0.07)
+
+        self._ax_w.relim()
+        self._ax_w.autoscale_view()
+
+        fenomeno = self._detect_phenomenon(m)
+        self._txt_fenomeno.set_text(fenomeno)
+        # Cor do label muda conforme o fenômeno
+        cor = ("#c084fc" if "BATIMENTO" in fenomeno
+               else ACCENT if "RESSONÂNCIA" in fenomeno
+               else AMBER_C)
+        self._txt_fenomeno.set_color(cor)
+        self._txt_fenomeno.get_bbox_patch().set_edgecolor(cor)
+
+        # ── Subplot 2: Envoltória isolada ──────────────────────────────────
+        self._ln_amp.set_data(t_ms, env)
+        pico_v = float(env.max()) if len(env) else 0.0
+        self._hl_pico.set_ydata([pico_v, pico_v])
+        self._txt_pico.set_text(f"pico={pico_v:.3f} V")
+        self._ax_e.relim()
+        self._ax_e.autoscale_view()
+        self._ax_e.set_ylim(bottom=0)
+
+        # ── Subplot 3: FFT ─────────────────────────────────────────────────
         freqs, amps = m["freqs"], m["amps"]
-        mask = freqs <= 2000
+        f_max_plot  = max(m["f1"] * 2.5, m["f2"] * 1.5, 2000) if m["f2"] > 0 else 2000
+        mask = freqs <= f_max_plot
         self._ln_f.set_data(freqs[mask], amps[mask])
-        self._ax_f.set_xlim(0, 2000)
-        self._ax_f.set_ylim(0, 1.1)
+        self._ax_f.set_xlim(0, f_max_plot)
+        self._ax_f.set_ylim(0, 1.15)
 
-        # Linhas de pico + anotações
         if m["f1"] > 0:
             self._vl_f1.set_xdata([m["f1"], m["f1"]])
             self._ann_f1.set_text(f"f₁={calc.fmt_hz(m['f1'])}")
-            self._ann_f1.xy = (m["f1"], 0.8)
+            self._ann_f1.xy = (m["f1"], 0.9)
         if m["f2"] > 0:
             self._vl_f2.set_xdata([m["f2"], m["f2"]])
             self._ann_f2.set_text(f"f₂={calc.fmt_hz(m['f2'])}")
-            self._ann_f2.xy = (m["f2"], 0.6)
+            self._ann_f2.xy = (m["f2"], 0.7)
+
+        # Anotação do batimento
+        if m["f_bat"] > 0 and m["f1"] > 0 and m["f2"] > 0:
+            self._ann_bat.set_text(
+                f"f_bat = |f₁−f₂| = {calc.fmt_hz(m['f_bat'])}\n"
+                f"f_med = (f₁+f₂)/2 = {calc.fmt_hz(m['f_med'])}")
+        else:
+            self._ann_bat.set_text("")
 
         self._canvas.draw_idle()
 
@@ -1022,47 +1150,66 @@ class BatimentosApp(ctk.CTk):
 
     def _save_csv(self):
         if self._last_time is None:
+            self._log("✗  Nenhum dado capturado para exportar.", err=True)
             return
-        m          = self._last_metrics
-        ts         = datetime.now().strftime("%Y%m%d_%H%M%S")
-        ts_pretty  = datetime.now().strftime("%d/%m/%Y  %H:%M:%S")
-        ch         = self._ch_var.get()
-        path       = Path(f"captura_{ts}.csv")
 
+        m         = self._last_metrics
+        ts        = datetime.now().strftime("%Y%m%d_%H%M%S")
+        ts_pretty = datetime.now().strftime("%d/%m/%Y  %H:%M:%S")
+        ch        = self._ch_var.get()
+
+        # ── Popup de salvar ──────────────────────────────────────────────────
+        raw = filedialog.asksaveasfilename(
+            title="Salvar dados do experimento",
+            initialfile=f"captura_{ts}",
+            defaultextension=".csv",
+            filetypes=[("CSV", "*.csv"), ("Todos os arquivos", "*.*")],
+        )
+        if not raw:          # usuário cancelou
+            return
+        path = Path(raw)
+
+        # ── Escreve CSV ──────────────────────────────────────────────────────
+        fenomeno = self._detect_phenomenon(m)
         with open(path, "w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
 
             w.writerow(["# ============================================================"])
             w.writerow(["# EXPERIMENTO: BATIMENTOS E RESSONÂNCIA"])
+            w.writerow(["# Ref: RBEF/SciELO — https://www.scielo.br/j/rbef/a/D7k5Pxj7HcmmbpGZJMf4wNs/"])
             w.writerow(["# ============================================================"])
             w.writerow([f"# Data/Hora:             {ts_pretty}"])
             w.writerow([f"# Canal:                 {ch}"])
             w.writerow([f"# Pontos capturados:     {len(self._last_time)}"])
+            w.writerow([f"# Fenômeno identificado: {fenomeno}"])
             w.writerow(["#"])
             w.writerow(["# MÉTRICAS CALCULADAS"])
-            w.writerow([f"# Período (T):           {calc.fmt_time(m.get('T',0))}"])
-            w.writerow([f"# Frequência (f=1/T):    {calc.fmt_hz(m.get('f',0))}"])
-            w.writerow([f"# Pico f1 (FFT):         {calc.fmt_hz(m.get('f1',0))}"])
-            w.writerow([f"# Pico f2 (FFT):         {calc.fmt_hz(m.get('f2',0))}"])
-            w.writerow([f"# Batimento |f1-f2|:     {calc.fmt_hz(m.get('f_bat',0))}"])
-            w.writerow([f"# Freq. Média (f1+f2)/2: {calc.fmt_hz(m.get('f_med',0))}"])
-            w.writerow([f"# Tensão máxima:         {m.get('v_max',0):.4f} V"])
-            w.writerow([f"# Tensão mínima:         {m.get('v_min',0):.4f} V"])
-            w.writerow(["#"])
-            w.writerow(["# Ref: Batimentos e Ressonância — RBEF/SciELO"])
-            w.writerow(["# https://www.scielo.br/j/rbef/a/D7k5Pxj7HcmmbpGZJMf4wNs/"])
+            w.writerow([f"# Período (T):           {calc.fmt_time(m.get('T', 0))}"])
+            w.writerow([f"# Frequência (f=1/T):    {calc.fmt_hz(m.get('f', 0))}"])
+            w.writerow([f"# Pico f₁ (FFT):         {calc.fmt_hz(m.get('f1', 0))}"])
+            w.writerow([f"# Pico f₂ (FFT):         {calc.fmt_hz(m.get('f2', 0))}"])
+            w.writerow([f"# Batimento |f₁−f₂|:     {calc.fmt_hz(m.get('f_bat', 0))}"])
+            w.writerow([f"# Freq. Média (f₁+f₂)/2: {calc.fmt_hz(m.get('f_med', 0))}"])
+            w.writerow([f"# Tensão máxima:          {m.get('v_max', 0):.4f} V"])
+            w.writerow([f"# Tensão mínima:          {m.get('v_min', 0):.4f} V"])
             w.writerow(["# ============================================================"])
             w.writerow([])
             w.writerow(["# SEÇÃO 1 — FORMA DE ONDA"])
             w.writerow(["tempo_s", "tensao_v"])
-            for t, v in zip(self._last_time, self._last_voltage):
-                w.writerow([f"{t:.9f}", f"{v:.6f}"])
+            for ti, vi in zip(self._last_time, self._last_voltage):
+                w.writerow([f"{ti:.9f}", f"{vi:.6f}"])
             w.writerow([])
             w.writerow(["# SEÇÃO 2 — ESPECTRO FFT"])
             w.writerow(["frequencia_hz", "amplitude_norm"])
-            for f, a in zip(m.get("freqs", []), m.get("amps", [])):
-                if f <= 5000:
-                    w.writerow([f"{f:.4f}", f"{a:.6f}"])
+            for fi, ai in zip(m.get("freqs", []), m.get("amps", [])):
+                if fi <= 5000:
+                    w.writerow([f"{fi:.4f}", f"{ai:.6f}"])
+            w.writerow([])
+            w.writerow(["# SEÇÃO 3 — ENVOLTÓRIA"])
+            w.writerow(["tempo_s", "envoltoria_v"])
+            env = self._compute_envelope(self._last_voltage)
+            for ti, ei in zip(self._last_time, env):
+                w.writerow([f"{ti:.9f}", f"{ei:.6f}"])
 
         self._log(f"💾  Salvo: {path.resolve()}")
 
