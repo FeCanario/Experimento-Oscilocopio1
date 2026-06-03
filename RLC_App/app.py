@@ -427,33 +427,33 @@ class BatimentosApp(ctk.CTk):
         self._canvas.draw()
 
     def _build_consolidated_panel(self, parent):
-        """Aba 3 — gráfico consolidado: onda + envoltória + FFT identificado."""
+        """Aba 3 — gráfico consolidado: forma de onda + FFT identificada."""
         outer = ctk.CTkFrame(parent, fg_color=SCOPE_BG, corner_radius=0)
         outer.grid(row=0, column=0, sticky="nsew")
         outer.grid_rowconfigure(0, weight=1)
         outer.grid_columnconfigure(0, weight=1)
 
         self._fig_c = Figure(facecolor=SCOPE_BG)
-        gs = GridSpec(3, 1, figure=self._fig_c,
-                      height_ratios=[3, 1.4, 1.6],
+        gs = GridSpec(2, 1, figure=self._fig_c,
+                      height_ratios=[2, 1],
                       hspace=0.08,
                       left=0.08, right=0.98,
                       top=0.93, bottom=0.07)
 
-        # ── C1: Forma de onda + envoltória ────────────────────────────────
+        # ── C1: Forma de onda ─────────────────────────────────────────────
         self._ax_cw = self._fig_c.add_subplot(gs[0])
         self._style_ax(self._ax_cw)
         self._ax_cw.set_ylabel("Tensão  (V)", color=TEXT_S, fontsize=9)
         self._ax_cw.axhline(0, color=SCOPE_GRID, lw=0.8)
         self._ax_cw.set_xticklabels([])
 
-        self._ln_cw,      = self._ax_cw.plot([], [], color=WAVE_C, lw=1.0,
-                                               antialiased=True, label="Sinal")
-        self._ln_cenv,    = self._ax_cw.plot([], [], color=PEAK2_C, lw=1.8,
-                                               ls="--", alpha=0.9, label="Envoltória")
-        self._ln_cenv_neg,= self._ax_cw.plot([], [], color=PEAK2_C, lw=1.8,
-                                               ls="--", alpha=0.9)
-        self._fill_cenv   = None
+        self._ln_cw, = self._ax_cw.plot([], [], color=WAVE_C, lw=1.2,
+                                         antialiased=True)
+
+        self._ax_cw.text(0.01, 0.97, "FORMA DE ONDA",
+                         transform=self._ax_cw.transAxes,
+                         color=WAVE_C, fontsize=9, va="top",
+                         fontfamily="monospace")
 
         # Badge de fenômeno identificado
         self._txt_cfenomeno = self._ax_cw.text(
@@ -464,34 +464,8 @@ class BatimentosApp(ctk.CTk):
             bbox=dict(boxstyle="round,pad=0.4", fc=SCOPE_BG,
                       ec=AMBER_C, lw=1.5, alpha=0.92))
 
-        self._ax_cw.text(0.01, 0.97, "FORMA DE ONDA  +  ENVOLTÓRIA",
-                         transform=self._ax_cw.transAxes,
-                         color=WAVE_C, fontsize=9, va="top",
-                         fontfamily="monospace")
-        self._ax_cw.legend(facecolor=SCOPE_BG, edgecolor=SCOPE_GRID,
-                           labelcolor=TEXT_S, fontsize=8, loc="lower right")
-
-        # ── C2: Envoltória isolada — mostra modulação do batimento ────────
-        self._ax_ce = self._fig_c.add_subplot(gs[1])
-        self._style_ax(self._ax_ce)
-        self._ax_ce.set_ylabel("Amp. (V)", color=TEXT_S, fontsize=8)
-        self._ax_ce.set_xticklabels([])
-        self._ax_ce.text(0.01, 0.90, "ENVOLTÓRIA  —  modulação de amplitude",
-                         transform=self._ax_ce.transAxes,
-                         color=PEAK2_C, fontsize=8, va="top",
-                         fontfamily="monospace")
-
-        self._ln_camp,  = self._ax_ce.plot([], [], color=PEAK2_C,
-                                            lw=1.4, antialiased=True)
-        self._hl_cpico  = self._ax_ce.axhline(np.nan, color=PEAK1_C,
-                                               lw=1, ls=":", alpha=0.8)
-        self._txt_cpico = self._ax_ce.text(
-            0.99, 0.88, "", transform=self._ax_ce.transAxes,
-            color=PEAK1_C, fontsize=8, va="top", ha="right",
-            fontfamily="monospace")
-
-        # ── C3: FFT com identificação completa ────────────────────────────
-        self._ax_cf = self._fig_c.add_subplot(gs[2])
+        # ── C2: FFT com identificação completa ────────────────────────────
+        self._ax_cf = self._fig_c.add_subplot(gs[1])
         self._style_ax(self._ax_cf)
         self._ax_cf.set_xlabel("Frequência  (Hz)", color=TEXT_S, fontsize=9)
         self._ax_cf.set_ylabel("Amp. norm.", color=TEXT_S, fontsize=8)
@@ -500,21 +474,21 @@ class BatimentosApp(ctk.CTk):
                          color=FFT_C, fontsize=9, va="top",
                          fontfamily="monospace")
 
-        self._ln_cf,   = self._ax_cf.plot([], [], color=FFT_C,
-                                           lw=1.1, antialiased=True)
-        self._vl_cf1   = self._ax_cf.axvline(np.nan, color=PEAK1_C,
-                                              lw=1.8, ls="--", alpha=0.9)
-        self._vl_cf2   = self._ax_cf.axvline(np.nan, color=PEAK2_C,
-                                              lw=1.8, ls="--", alpha=0.9)
-        self._ann_cf1  = self._ax_cf.annotate(
+        self._ln_cf,  = self._ax_cf.plot([], [], color=FFT_C,
+                                          lw=1.1, antialiased=True)
+        self._vl_cf1  = self._ax_cf.axvline(np.nan, color=PEAK1_C,
+                                             lw=1.8, ls="--", alpha=0.9)
+        self._vl_cf2  = self._ax_cf.axvline(np.nan, color=PEAK2_C,
+                                             lw=1.8, ls="--", alpha=0.9)
+        self._ann_cf1 = self._ax_cf.annotate(
             "", xy=(0, 0.90), xycoords=("data", "axes fraction"),
-            color=PEAK1_C, fontsize=9, fontfamily="monospace", ha="center",
-            fontweight="bold")
-        self._ann_cf2  = self._ax_cf.annotate(
+            color=PEAK1_C, fontsize=9, fontfamily="monospace",
+            ha="center", fontweight="bold")
+        self._ann_cf2 = self._ax_cf.annotate(
             "", xy=(0, 0.72), xycoords=("data", "axes fraction"),
-            color=PEAK2_C, fontsize=9, fontfamily="monospace", ha="center",
-            fontweight="bold")
-        # Caixa de resumo no canto da FFT
+            color=PEAK2_C, fontsize=9, fontfamily="monospace",
+            ha="center", fontweight="bold")
+
         self._txt_cbat = self._ax_cf.text(
             0.99, 0.90, "", transform=self._ax_cf.transAxes,
             color=AMBER_C, fontsize=9, va="top", ha="right",
@@ -1177,21 +1151,11 @@ class BatimentosApp(ctk.CTk):
         self._update_consolidated(t_ms, v, m, freqs, amps)
 
     def _update_consolidated(self, t_ms, v, m, freqs, amps):
-        """Atualiza os 3 subplots da aba Análise Consolidada."""
-        env    = self._compute_envelope(v)
-        f_max  = max(m["f1"] * 2.5, m["f2"] * 1.5, 2000) if m["f2"] > 0 else 2000
-        pico_v = float(env.max()) if len(env) else 0.0
+        """Atualiza os 2 subplots da aba Análise Consolidada."""
+        f_max = max(m["f1"] * 2.5, m["f2"] * 1.5, 2000) if m["f2"] > 0 else 2000
 
-        # C1 — Forma de onda + envoltória
+        # C1 — Forma de onda
         self._ln_cw.set_data(t_ms, v)
-        self._ln_cenv.set_data(t_ms, env)
-        self._ln_cenv_neg.set_data(t_ms, -env)
-
-        if self._fill_cenv is not None:
-            self._fill_cenv.remove()
-        self._fill_cenv = self._ax_cw.fill_between(
-            t_ms, -env, env, color=PEAK2_C, alpha=0.08)
-
         self._ax_cw.relim()
         self._ax_cw.autoscale_view()
         self._ax_cw.set_xlabel("Tempo  (ms)", color=TEXT_S, fontsize=9)
@@ -1204,16 +1168,7 @@ class BatimentosApp(ctk.CTk):
         self._txt_cfenomeno.set_color(cor)
         self._txt_cfenomeno.get_bbox_patch().set_edgecolor(cor)
 
-        # C2 — Envoltória isolada
-        self._ln_camp.set_data(t_ms, env)
-        self._hl_cpico.set_ydata([pico_v, pico_v])
-        self._txt_cpico.set_text(f"pico = {pico_v:.3f} V")
-        self._ax_ce.relim()
-        self._ax_ce.autoscale_view()
-        self._ax_ce.set_ylim(bottom=0)
-        self._ax_ce.set_xlabel("Tempo  (ms)", color=TEXT_S, fontsize=9)
-
-        # C3 — FFT identificada
+        # C2 — FFT identificada
         mask = freqs <= f_max
         self._ln_cf.set_data(freqs[mask], amps[mask])
         self._ax_cf.set_xlim(0, f_max)
